@@ -54,7 +54,7 @@ API docs: http://localhost:8000/docs
 
 1. Create an OAuth 2.0 (3LO) app at https://developer.atlassian.com/console/myapps/
 2. Set callback URL to `JIRA_OAUTH_REDIRECT_URI` (default `http://localhost:8000/integrations/jira/oauth/callback`)
-3. Add scopes: `read:jira-work`, `read:jira-user`, `offline_access`
+3. Add scopes including: `read:jira-work`, `read:jira-user`, `manage:jira-webhook`, `offline_access` (and reconnect OAuth if scopes change)
 4. Configure `.env`:
 
 ```bash
@@ -64,6 +64,8 @@ JIRA_OAUTH_REDIRECT_URI=http://localhost:8000/integrations/jira/oauth/callback
 JIRA_OAUTH_FRONTEND_REDIRECT=http://localhost:5173/settings/jira?status=
 # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 JIRA_TOKEN_ENCRYPTION_KEY=...
+# Public HTTPS base (same host as OAuth callback in local/dev, e.g. ngrok)
+JIRA_WEBHOOK_BASE_URL=https://xxxx.ngrok-free.app
 ```
 
 Then (admin+ on the Keystone project):
@@ -72,8 +74,10 @@ Then (admin+ on the Keystone project):
 2. After consent, Atlassian redirects to the callback; tokens are stored per project
 3. If multiple Atlassian sites: `PUT /projects/{id}/jira/cloud` with `{"cloud_id": "..."}`
 4. `GET /integrations/jira/projects?project_id={id}` — list Jira projects
-5. `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}`
+5. `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}` (also registers dynamic webhooks for issue created/updated/deleted)
 6. `POST /projects/{id}/jira/sync` — upsert team members, sprints, epics, stories, tasks, events
+
+Dynamic webhooks expire after ~30 days; re-link the Jira project key to re-register. Unlink or disconnect removes the remote webhook.
 
 ## Project roles
 

@@ -272,3 +272,30 @@ class JiraClient:
                 break
             start_at += len(values)
         return sprints
+
+    def register_webhooks(
+        self,
+        *,
+        url: str,
+        events: list[str],
+        jql_filter: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/rest/api/3/webhook",
+            json={
+                "url": url,
+                "webhooks": [
+                    {
+                        "events": events,
+                        "jqlFilter": jql_filter,
+                    }
+                ],
+            },
+        )
+
+    def delete_webhooks(self, webhook_ids: list[int | str]) -> None:
+        ids = [int(wid) for wid in webhook_ids if wid is not None]
+        if not ids:
+            return
+        self._request("DELETE", "/rest/api/3/webhook", json={"webhookIds": ids})

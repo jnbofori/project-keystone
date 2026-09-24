@@ -3,7 +3,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-JIRA_OAUTH_SCOPES = "read:jira-work read:jira-user manage:jira-webhook read:project:jira read:board-scope:jira-software read:sprint:jira-software offline_access"
+JIRA_OAUTH_SCOPES = "read:jira-work read:jira-user manage:jira-webhook read:project:jira read:board-scope:jira-software read:sprint:jira-software read:webhook:jira read:jql:jira read:field:jira write:webhook:jira offline_access"
 
 
 class Settings(BaseSettings):
@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     jira_oauth_frontend_redirect: str = "http://localhost:5173/settings/jira?status="
     jira_token_encryption_key: str = ""
     jira_story_points_field: str = ""
+    jira_webhook_base_url: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
