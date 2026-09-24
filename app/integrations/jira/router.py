@@ -498,6 +498,7 @@ def receive_jira_webhook(
     if not token or token != project.webhook_secret:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
 
+    print("payload", payload)
     try:
         handle_issue_webhook(db, project, payload)
     except Exception:
@@ -575,6 +576,7 @@ def list_jira_webhooks(
     try:
         with _client_for_org(db, project.organization_id) as client:
             webhooks = client.list_webhooks()
+            print("webhooks", webhooks)
             db.commit()
     except JiraAPIError as exc:
         db.rollback()

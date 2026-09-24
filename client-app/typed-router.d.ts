@@ -35,6 +35,7 @@ declare module 'vue-router/auto-routes' {
       | '/(main)/projects/'
       | '/(main)/projects/[id]'
       | '/(main)/settings/jira'
+      | '/(main)/settings/organization'
       | '/(main)/starter'
       | '/(main)/utils/color'
       | '/(main)/utils/shadow'
@@ -64,6 +65,13 @@ declare module 'vue-router/auto-routes' {
     '/(main)/settings/jira': RouteRecordInfo<
       '/(main)/settings/jira',
       '/settings/jira',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/(main)/settings/organization': RouteRecordInfo<
+      '/(main)/settings/organization',
+      '/settings/organization',
       Record<never, never>,
       Record<never, never>,
       | never
@@ -137,6 +145,7 @@ declare module 'vue-router/auto-routes' {
         | '/(main)/projects/'
         | '/(main)/projects/[id]'
         | '/(main)/settings/jira'
+        | '/(main)/settings/organization'
         | '/(main)/starter'
         | '/(main)/utils/color'
         | '/(main)/utils/shadow'
@@ -165,6 +174,12 @@ declare module 'vue-router/auto-routes' {
     'src/pages/(main)/settings/jira.vue': {
       routes:
         | '/(main)/settings/jira'
+      views:
+        | never
+    }
+    'src/pages/(main)/settings/organization.vue': {
+      routes:
+        | '/(main)/settings/organization'
       views:
         | never
     }

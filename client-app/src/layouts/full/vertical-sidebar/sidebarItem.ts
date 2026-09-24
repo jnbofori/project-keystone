@@ -1,4 +1,4 @@
-import { DashboardIcon, FolderIcon } from 'vue-tabler-icons';
+import { DashboardIcon, FolderIcon, BuildingIcon } from 'vue-tabler-icons';
 
 export interface menu {
   header?: string;
@@ -17,11 +17,16 @@ export interface menu {
 }
 
 const sidebarItem: menu[] = [
-  { header: 'Knowledge Assistant' },
+  { header: 'Keystone' },
   {
     title: 'Dashboard',
     icon: DashboardIcon,
     to: '/dashboard/default'
+  },
+  {
+    title: 'Organization',
+    icon: BuildingIcon,
+    to: '/settings/organization'
   },
   {
     title: 'Projects',

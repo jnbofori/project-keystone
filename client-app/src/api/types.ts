@@ -1,5 +1,7 @@
 export type ProjectRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+export type OrganizationRole = 'owner' | 'admin' | 'member';
+
 export type DocumentStatus = 'pending' | 'processing' | 'ready' | 'failed';
 
 export interface User {
@@ -16,10 +18,34 @@ export interface Token {
 export interface UserRegister {
   email: string;
   password: string;
+  organization_name?: string;
+  invite_code?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  invite_code: string | null;
+  created_by: string;
+  created_at: string;
+  current_user_role: OrganizationRole;
+}
+
+export interface OrganizationMember {
+  id: string;
+  user_id: string;
+  email: string;
+  role: OrganizationRole;
+  created_at: string;
+}
+
+export interface OrganizationMemberRoleUpdate {
+  role: OrganizationRole;
 }
 
 export interface Project {
   id: string;
+  organization_id: string;
   name: string;
   description: string | null;
   jira_project_key: string | null;
@@ -134,6 +160,12 @@ export const ROLE_RANK: Record<ProjectRole, number> = {
   member: 1,
   admin: 2,
   owner: 3
+};
+
+export const ORG_ROLE_RANK: Record<OrganizationRole, number> = {
+  member: 0,
+  admin: 1,
+  owner: 2
 };
 
 export const SUPPORTED_EXTENSIONS = ['.txt', '.md', '.pdf', '.docx'];

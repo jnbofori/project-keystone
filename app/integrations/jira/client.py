@@ -301,7 +301,8 @@ class JiraClient:
         self._request("DELETE", "/rest/api/3/webhook", json={"webhookIds": ids})
 
     def list_webhooks(self) -> list[dict[str, Any]]:
-        data = self._request("GET", "/rest/api/3/project/search", params={"maxResults": 100})
+        data = self._request("GET", "/rest/api/3/webhook", params={"maxResults": 100})
+        print("list_webhooks", data)
         if isinstance(data, list):
             return data
         return list(data.get("values") or [])

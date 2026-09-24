@@ -216,10 +216,10 @@ watch(
 
     <v-tabs v-model="activeTab" color="primary" class="mt-4" show-arrows @update:model-value="onTabChange">
       <v-tab value="overview">Overview</v-tab>
+      <v-tab v-if="permissions.canManageJira" value="jira">Jira</v-tab>
+      <v-tab v-if="permissions.canManageMembers" value="members">Members</v-tab>
       <v-tab value="documents">Documents</v-tab>
       <v-tab value="ask">Ask</v-tab>
-      <v-tab v-if="permissions.canManageMembers" value="members">Members</v-tab>
-      <v-tab v-if="permissions.canManageJira" value="jira">Jira</v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab" class="mt-4">
@@ -250,38 +250,17 @@ watch(
             </v-card>
           </v-col>
         </v-row>
-      </v-window-item>
-
-      <v-window-item value="documents">
-        <DocumentUpload
-          v-if="permissions.canUpload"
-          :project-id="projectId"
-          class="mb-4"
-          @uploaded="handleDocumentUploaded"
-        />
-        <v-alert v-else type="info" variant="tonal" class="mb-4">
-          You have viewer access and cannot upload documents.
+        <v-alert type="info" variant="tonal" class="mt-4">
+          Use <strong>Jira</strong> and <strong>Members</strong> for delivery. Documents and Ask are
+          knowledge features for this project.
         </v-alert>
-
-        <DocumentList
-          :documents="documents"
-          :loading="documentsLoading"
-          :can-delete="permissions.canDeleteDocuments"
-          @delete="confirmDeleteDocument"
-        />
       </v-window-item>
 
-      <v-window-item value="ask">
-        <QueryHistory :queries="queries" :loading="queriesLoading" class="mb-4" />
-        <QueryPanel
+      <v-window-item v-if="permissions.canManageJira" value="jira">
+        <JiraIntegrationPanel
           :project-id="projectId"
-          :disabled="!canAskQuestions"
-          :disabled-message="
-            readyDocumentCount === 0
-              ? 'Upload documents and wait until at least one is ready before asking questions.'
-              : 'You do not have permission to ask questions in this project.'
-          "
-          @asked="handleQueryAsked"
+          :linked-jira-key="project?.jira_project_key"
+          @linked="handleJiraLinked"
         />
       </v-window-item>
 
@@ -321,11 +300,42 @@ watch(
         </UiParentCard>
       </v-window-item>
 
-      <v-window-item v-if="permissions.canManageJira" value="jira">
-        <JiraIntegrationPanel
+      <v-window-item value="documents">
+        <v-alert type="info" variant="tonal" class="mb-4" density="comfortable">
+          Knowledge — upload sources for Ask.
+        </v-alert>
+        <DocumentUpload
+          v-if="permissions.canUpload"
           :project-id="projectId"
-          :linked-jira-key="project?.jira_project_key"
-          @linked="handleJiraLinked"
+          class="mb-4"
+          @uploaded="handleDocumentUploaded"
+        />
+        <v-alert v-else type="info" variant="tonal" class="mb-4">
+          You have viewer access and cannot upload documents.
+        </v-alert>
+
+        <DocumentList
+          :documents="documents"
+          :loading="documentsLoading"
+          :can-delete="permissions.canDeleteDocuments"
+          @delete="confirmDeleteDocument"
+        />
+      </v-window-item>
+
+      <v-window-item value="ask">
+        <v-alert type="info" variant="tonal" class="mb-4" density="comfortable">
+          Knowledge — ask questions against this project’s documents.
+        </v-alert>
+        <QueryHistory :queries="queries" :loading="queriesLoading" class="mb-4" />
+        <QueryPanel
+          :project-id="projectId"
+          :disabled="!canAskQuestions"
+          :disabled-message="
+            readyDocumentCount === 0
+              ? 'Upload documents and wait until at least one is ready before asking questions.'
+              : 'You do not have permission to ask questions in this project.'
+          "
+          @asked="handleQueryAsked"
         />
       </v-window-item>
     </v-window>

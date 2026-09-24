@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import type { ProjectRole } from '@/api/types';
+import { computed, ref, watch } from 'vue';
+import type { OrganizationMember, ProjectRole } from '@/api/types';
 import { useProjectsStore } from '@/stores/projects';
+import { useOrganizationStore } from '@/stores/organization';
 import { useSnackbar } from '@/composables/useSnackbar';
 import { getErrorMessage } from '@/utils/apiError';
 
@@ -16,12 +17,14 @@ const emit = defineEmits<{
 }>();
 
 const projectsStore = useProjectsStore();
+const orgStore = useOrganizationStore();
 const { showSuccess, showError } = useSnackbar();
 
 const formRef = ref();
 const email = ref('');
 const role = ref<ProjectRole>('member');
 const saving = ref(false);
+const loadingMembers = ref(false);
 
 const roleOptions: ProjectRole[] = ['viewer', 'member', 'admin'];
 
@@ -30,13 +33,30 @@ const emailRules = [
   (v: string) => /.+@.+\..+/.test(v) || 'Email must be valid'
 ];
 
+const orgMemberItems = computed(() =>
+  orgStore.members.map((member: OrganizationMember) => ({
+    title: `${member.email} (${member.role})`,
+    value: member.email
+  }))
+);
+
 watch(
   () => props.modelValue,
-  (open) => {
+  async (open) => {
     if (open) {
       email.value = '';
       role.value = 'member';
       formRef.value?.resetValidation?.();
+      loadingMembers.value = true;
+      try {
+        if (!orgStore.members.length) {
+          await orgStore.fetchMembers();
+        }
+      } catch (error) {
+        showError(getErrorMessage(error, 'Failed to load organization members'));
+      } finally {
+        loadingMembers.value = false;
+      }
     }
   }
 );
@@ -71,8 +91,24 @@ async function handleSubmit() {
     <v-card>
       <v-card-title>Add Member</v-card-title>
       <v-card-text>
+        <p class="text-body-2 text-medium-emphasis mb-4">
+          Only people who already joined your organization can be added. Share the org invite code
+          from Organization settings if they need an account.
+        </p>
         <v-form ref="formRef" @submit.prevent="handleSubmit">
-          <v-text-field v-model="email" label="User email" :rules="emailRules" required hide-details="auto" class="mb-4" />
+          <v-autocomplete
+            v-model="email"
+            :items="orgMemberItems"
+            :loading="loadingMembers || orgStore.membersLoading"
+            :rules="emailRules"
+            label="Organization member"
+            placeholder="Select or type email"
+            required
+            hide-details="auto"
+            class="mb-4"
+            clearable
+            auto-select-first
+          />
           <v-select
             v-model="role"
             :items="roleOptions"

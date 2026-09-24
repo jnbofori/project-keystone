@@ -7,22 +7,22 @@ import type {
   JiraSyncResponse
 } from './types';
 
-export async function startOAuth(projectId: string): Promise<JiraOAuthStartResponse> {
-  const { data } = await apiClient.get<JiraOAuthStartResponse>(`/projects/${projectId}/jira/oauth/start`);
+export async function startOAuth(): Promise<JiraOAuthStartResponse> {
+  const { data } = await apiClient.get<JiraOAuthStartResponse>('/organizations/me/jira/oauth/start');
   return data;
 }
 
-export async function getConnection(projectId: string): Promise<JiraConnection> {
-  const { data } = await apiClient.get<JiraConnection>(`/projects/${projectId}/jira/connection`);
+export async function getConnection(): Promise<JiraConnection> {
+  const { data } = await apiClient.get<JiraConnection>('/organizations/me/jira/connection');
   return data;
 }
 
-export async function disconnect(projectId: string): Promise<void> {
-  await apiClient.delete(`/projects/${projectId}/jira/connection`);
+export async function disconnect(): Promise<void> {
+  await apiClient.delete('/organizations/me/jira/connection');
 }
 
-export async function selectCloud(projectId: string, cloudId: string): Promise<JiraConnection> {
-  const { data } = await apiClient.put<JiraConnection>(`/projects/${projectId}/jira/cloud`, {
+export async function selectCloud(cloudId: string): Promise<JiraConnection> {
+  const { data } = await apiClient.put<JiraConnection>('/organizations/me/jira/cloud', {
     cloud_id: cloudId
   });
   return data;

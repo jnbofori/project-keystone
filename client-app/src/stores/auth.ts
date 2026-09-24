@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia';
 import { authApi } from '@/api';
 import { getStoredToken, setStoredToken } from '@/api/client';
-import type { User } from '@/api/types';
+import type { User, UserRegister } from '@/api/types';
 import { getErrorMessage } from '@/utils/apiError';
+import { useOrganizationStore } from '@/stores/organization';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -28,11 +29,11 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async register(email: string, password: string) {
+    async register(payload: UserRegister) {
       this.loading = true;
       try {
-        await authApi.register({ email, password });
-        await this.login(email, password);
+        await authApi.register(payload);
+        await this.login(payload.email, payload.password);
       } finally {
         this.loading = false;
       }
@@ -59,6 +60,7 @@ export const useAuthStore = defineStore('auth', {
       this.user = null;
       this.token = null;
       setStoredToken(null);
+      useOrganizationStore().clear();
     }
   }
 });

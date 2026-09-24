@@ -10,10 +10,6 @@ const router = useRouter();
 const { showSuccess, showError } = useSnackbar();
 
 const status = computed(() => String(route.query.status ?? ''));
-const projectId = computed(() => {
-  const value = route.query.project_id;
-  return typeof value === 'string' && value ? value : null;
-});
 const needsSite = computed(() => String(route.query.needs_site ?? '') === '1');
 const message = computed(() => {
   const value = route.query.message;
@@ -26,7 +22,8 @@ const isSuccess = computed(() => status.value === 'success');
 
 const breadcrumbs = [
   { title: 'Home', disabled: false, href: '/dashboard/default' },
-  { title: 'Jira Connection', disabled: true, href: '#' }
+  { title: 'Organization', disabled: false, href: '/settings/organization' },
+  { title: 'Jira OAuth', disabled: true, href: '#' }
 ];
 
 onMounted(() => {
@@ -35,14 +32,10 @@ onMounted(() => {
   if (isSuccess.value) {
     const suffix = needsSite.value ? ' Select an Atlassian site to finish setup.' : '';
     showSuccess(`Jira connected successfully.${suffix}`);
-    if (projectId.value) {
-      void router.replace({
-        path: `/projects/${projectId.value}`,
-        query: { tab: 'jira' }
-      });
-      return;
-    }
-    void router.replace('/projects');
+    void router.replace({
+      path: '/settings/organization',
+      query: { section: 'jira' }
+    });
     return;
   }
 
@@ -60,26 +53,26 @@ onMounted(() => {
 
     <v-alert v-if="isSuccess" type="success" variant="tonal" class="mb-4">
       Jira connected successfully.
-      <span v-if="needsSite"> Select an Atlassian site on the project Jira tab to finish setup.</span>
-      <span v-if="projectId"> Redirecting to the project…</span>
+      <span v-if="needsSite"> Select an Atlassian site in Organization settings to finish setup.</span>
+      Redirecting…
     </v-alert>
 
     <v-alert v-else-if="isError" type="error" variant="tonal" class="mb-4">
-      {{ message || 'Jira OAuth failed. Please try connecting again from a project.' }}
+      {{ message || 'Jira OAuth failed. Please try connecting again from Organization settings.' }}
     </v-alert>
 
     <v-alert v-else type="info" variant="tonal" class="mb-4">
-      Waiting for OAuth result. If you arrived here manually, open a project and use the Jira tab to connect.
+      Waiting for OAuth result. If you arrived here manually, open Organization settings to connect
+      Jira.
     </v-alert>
 
     <div class="d-flex ga-3">
       <v-btn
-        v-if="projectId"
         color="primary"
         variant="flat"
-        :to="`/projects/${projectId}?tab=jira`"
+        :to="{ path: '/settings/organization', query: { section: 'jira' } }"
       >
-        Open project Jira tab
+        Open organization settings
       </v-btn>
       <v-btn variant="tonal" to="/projects">Back to projects</v-btn>
     </div>
