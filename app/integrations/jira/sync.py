@@ -64,10 +64,15 @@ def sync_jira_project(
         raise ValueError("Project is not linked to a Jira project key")
 
     connection = (
-        db.query(JiraConnection).filter(JiraConnection.project_id == project.id).first()
+        db.query(JiraConnection)
+        .filter(JiraConnection.organization_id == project.organization_id)
+        .first()
     )
     if connection is None:
-        raise ValueError("Project has no Jira OAuth connection (connect via /projects/{id}/jira/oauth/start)")
+        raise ValueError(
+            "Organization has no Jira OAuth connection "
+            "(connect via /organizations/me/jira/oauth/start)"
+        )
 
     result = SyncResult(project_id=project.id, jira_project_key=project.jira_project_key)
 

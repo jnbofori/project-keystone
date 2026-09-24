@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.auth.security import get_current_user
 from app.database import get_db
+from app.models.organization import OrganizationMember
 from app.models.project import Project, ProjectMember, ProjectRole
 from app.models.user import User
+from app.organizations.dependencies import get_user_org_membership
 from app.projects.dependencies import require_project_member
 from app.schemas.project import (
     ProjectCreate,
@@ -22,6 +24,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 def _to_project_response(project: Project, membership: ProjectMember) -> ProjectResponse:
     return ProjectResponse(
         id=project.id,
+        organization_id=project.organization_id,
         name=project.name,
         description=project.description,
         jira_project_key=project.jira_project_key,
@@ -37,8 +40,15 @@ def create_project(
     payload: ProjectCreate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    org_bundle: Annotated[tuple, Depends(get_user_org_membership)],
 ) -> ProjectResponse:
-    project = Project(name=payload.name, description=payload.description, created_by=current_user.id)
+    organization, _ = org_bundle
+    project = Project(
+        name=payload.name,
+        description=payload.description,
+        created_by=current_user.id,
+        organization_id=organization.id,
+    )
     db.add(project)
     db.flush()
 
@@ -113,6 +123,20 @@ def add_member(
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    org_member = (
+        db.query(OrganizationMember)
+        .filter(
+            OrganizationMember.user_id == user.id,
+            OrganizationMember.organization_id == project.organization_id,
+        )
+        .first()
+    )
+    if not org_member:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not a member of this organization",
+        )
 
     existing = (
         db.query(ProjectMember)

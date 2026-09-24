@@ -16,6 +16,7 @@ from app.models.enums import (
 )
 from app.models.epic import Epic
 from app.models.jira_connection import JiraConnection
+from app.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.models.project import Project, ProjectMember, ProjectRole
 from app.models.project_event import ProjectEvent
 from app.models.pull_request import PullRequest
@@ -29,6 +30,9 @@ from app.models.user import User
 
 __all__ = [
     "User",
+    "Organization",
+    "OrganizationMember",
+    "OrganizationRole",
     "Project",
     "ProjectMember",
     "ProjectRole",

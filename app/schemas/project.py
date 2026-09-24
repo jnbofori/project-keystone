@@ -13,6 +13,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectResponse(BaseModel):
     id: uuid.UUID
+    organization_id: uuid.UUID
     name: str
     description: str | None
     jira_project_key: str | None = None

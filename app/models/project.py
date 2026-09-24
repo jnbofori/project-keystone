@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from app.models.discussion import Discussion
     from app.models.document import Document
     from app.models.epic import Epic
-    from app.models.jira_connection import JiraConnection
+    from app.models.organization import Organization
     from app.models.project_event import ProjectEvent
     from app.models.pull_request import PullRequest
     from app.models.query_log import QueryLog
@@ -47,7 +47,8 @@ class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
         Index(
-            "uq_projects_jira_project_key",
+            "uq_projects_org_jira_project_key",
+            "organization_id",
             "jira_project_key",
             unique=True,
             postgresql_where=text("jira_project_key IS NOT NULL"),
@@ -55,13 +56,20 @@ class Project(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_project_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_project_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    webhook_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    webhook_expiration: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    webhook_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    organization: Mapped["Organization"] = relationship(back_populates="projects")
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     query_logs: Mapped[list["QueryLog"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -75,11 +83,6 @@ class Project(Base):
     discussions: Mapped[list["Discussion"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     risks: Mapped[list["Risk"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     events: Mapped[list["ProjectEvent"]] = relationship(back_populates="project", cascade="all, delete-orphan")
-    jira_connection: Mapped["JiraConnection | None"] = relationship(
-        back_populates="project",
-        cascade="all, delete-orphan",
-        uselist=False,
-    )
 
 
 class ProjectMember(Base):

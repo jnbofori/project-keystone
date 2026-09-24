@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.database import engine
 from app.documents.router import router as documents_router
 from app.integrations.jira.router import router as jira_router
+from app.organizations.router import router as organizations_router
 from app.projects.router import router as projects_router
 from app.queries.router import router as queries_router
 from app.rag.qdrant_store import check_qdrant_health, ensure_collection
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(organizations_router)
 app.include_router(projects_router)
 app.include_router(documents_router)
 app.include_router(queries_router)

@@ -43,17 +43,16 @@ def _webhook_callback_url(project_id: UUID, secret: str, settings: Settings) -> 
     return f"{base}/integrations/jira/webhooks/{project_id}?{query}"
 
 
-def _ensure_webhook_secret(connection: JiraConnection) -> str:
-    if connection.webhook_secret:
-        return connection.webhook_secret
-    connection.webhook_secret = secrets.token_urlsafe(32)
-    return connection.webhook_secret
+def _ensure_webhook_secret(project: Project) -> str:
+    if project.webhook_secret:
+        return project.webhook_secret
+    project.webhook_secret = secrets.token_urlsafe(32)
+    return project.webhook_secret
 
 
 def _parse_expiration(payload: dict[str, Any]) -> datetime:
     raw = payload.get("expirationDate") or payload.get("expiryDate")
     if isinstance(raw, (int, float)):
-        # Atlassian sometimes returns epoch millis
         ts = float(raw)
         if ts > 1e12:
             ts /= 1000.0
@@ -89,33 +88,33 @@ def _extract_created_webhook_id(payload: dict[str, Any]) -> str | None:
 
 def unregister_project_webhook(
     db: Session,
+    project: Project,
     connection: JiraConnection,
     settings: Settings | None = None,
 ) -> None:
     settings = settings or get_settings()
-    webhook_id = connection.webhook_id
+    webhook_id = project.webhook_id
     if not webhook_id:
-        connection.webhook_id = None
-        connection.webhook_expiration = None
-        db.add(connection)
+        project.webhook_id = None
+        project.webhook_expiration = None
+        db.add(project)
         return
 
     if not connection.cloud_id:
-        connection.webhook_id = None
-        connection.webhook_expiration = None
-        db.add(connection)
+        project.webhook_id = None
+        project.webhook_expiration = None
+        db.add(project)
         return
 
     try:
         with JiraClient.from_connection(db, connection, settings) as client:
             client.delete_webhooks([webhook_id])
     except JiraAPIError as exc:
-        # Still clear local state; remote may already be gone
         logger.warning("Failed to delete Jira webhook %s: %s", webhook_id, exc)
 
-    connection.webhook_id = None
-    connection.webhook_expiration = None
-    db.add(connection)
+    project.webhook_id = None
+    project.webhook_expiration = None
+    db.add(project)
 
 
 def register_project_webhook(
@@ -134,12 +133,11 @@ def register_project_webhook(
             status_code=503,
         )
 
-    # Replace existing webhook if any
-    if connection.webhook_id:
-        unregister_project_webhook(db, connection, settings)
+    if project.webhook_id:
+        unregister_project_webhook(db, project, connection, settings)
         db.flush()
 
-    secret = _ensure_webhook_secret(connection)
+    secret = _ensure_webhook_secret(project)
     url = _webhook_callback_url(project.id, secret, settings)
     jql = f'project = "{jira_project_key}"'
 
@@ -154,11 +152,30 @@ def register_project_webhook(
     if not webhook_id:
         raise JiraAPIError("Jira webhook registration returned no webhook id", status_code=502, body=payload)
 
-    connection.webhook_id = webhook_id
-    connection.webhook_expiration = _parse_expiration(payload or {})
-    connection.webhook_secret = secret
-    db.add(connection)
+    project.webhook_id = webhook_id
+    project.webhook_expiration = _parse_expiration(payload or {})
+    project.webhook_secret = secret
+    db.add(project)
     db.flush()
+
+
+def unregister_org_webhooks(
+    db: Session,
+    organization_id: UUID,
+    connection: JiraConnection,
+    settings: Settings | None = None,
+) -> None:
+    settings = settings or get_settings()
+    projects = (
+        db.query(Project)
+        .filter(Project.organization_id == organization_id, Project.webhook_id.isnot(None))
+        .all()
+    )
+    for project in projects:
+        try:
+            unregister_project_webhook(db, project, connection, settings)
+        except JiraAPIError as exc:
+            logger.warning("Failed unregistering webhook for project %s: %s", project.id, exc)
 
 
 def _load_lookup_maps(
@@ -250,7 +267,6 @@ def handle_issue_webhook(
         logger.info("Ignoring unsupported Jira webhook event %s", event)
         return
 
-    # Webhook payloads may omit fields; ensure we have enough to upsert
     fields = issue.get("fields")
     if not isinstance(fields, dict) or not fields.get("issuetype"):
         logger.warning("Jira webhook for %s missing fields; skipping upsert", issue_key)

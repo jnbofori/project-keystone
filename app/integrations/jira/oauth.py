@@ -31,12 +31,12 @@ def build_authorize_url(state: str, settings: Settings | None = None) -> str:
     return f"{AUTH_URL}?{urlencode(params)}"
 
 
-def create_oauth_state(project_id: UUID, user_id: UUID, settings: Settings | None = None) -> str:
+def create_oauth_state(organization_id: UUID, user_id: UUID, settings: Settings | None = None) -> str:
     settings = settings or get_settings()
     expire = datetime.now(UTC) + timedelta(minutes=STATE_TTL_MINUTES)
     payload = {
         "purpose": "jira_oauth",
-        "project_id": str(project_id),
+        "organization_id": str(organization_id),
         "user_id": str(user_id),
         "exp": expire,
     }
@@ -52,7 +52,7 @@ def parse_oauth_state(state: str, settings: Settings | None = None) -> tuple[UUI
     if payload.get("purpose") != "jira_oauth":
         raise JiraAPIError("Invalid OAuth state", status_code=400)
     try:
-        return UUID(payload["project_id"]), UUID(payload["user_id"])
+        return UUID(payload["organization_id"]), UUID(payload["user_id"])
     except (KeyError, ValueError) as exc:
         raise JiraAPIError("Invalid OAuth state payload", status_code=400) from exc
 

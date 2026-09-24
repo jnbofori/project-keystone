@@ -43,14 +43,19 @@ API docs: http://localhost:8000/docs
 
 ## Typical flow
 
-1. `POST /auth/register` — create account
+1. `POST /auth/register` — create account with either `organization_name` (new org) or `invite_code` (join existing)
 2. `POST /auth/login` — get JWT (form: username=email, password=...)
-3. `POST /projects` — create a project (Bearer token)
-4. `POST /projects/{id}/documents` — upload `.txt`, `.md`, `.pdf`, or `.docx`
-5. Poll `GET /projects/{id}/documents` until status is `ready`
-6. `POST /projects/{id}/queries` — ask a question
+3. `GET /organizations/me` — view org (invite code visible to org owner/admin)
+4. `POST /projects` — create a project under your organization (Bearer token)
+5. `POST /projects/{id}/documents` — upload `.txt`, `.md`, `.pdf`, or `.docx`
+6. Poll `GET /projects/{id}/documents` until status is `ready`
+7. `POST /projects/{id}/queries` — ask a question
+
+Project members can only be users who already belong to the same organization (share the invite code at registration).
 
 ## Jira Cloud sync (OAuth 2.0 / 3LO)
+
+Jira OAuth is **per organization** (one Atlassian Cloud site). Linking a Jira project key is still **per Keystone project**.
 
 1. Create an OAuth 2.0 (3LO) app at https://developer.atlassian.com/console/myapps/
 2. Set callback URL to `JIRA_OAUTH_REDIRECT_URI` (default `http://localhost:8000/integrations/jira/oauth/callback`)
@@ -68,16 +73,18 @@ JIRA_TOKEN_ENCRYPTION_KEY=...
 JIRA_WEBHOOK_BASE_URL=https://xxxx.ngrok-free.app
 ```
 
-Then (admin+ on the Keystone project):
+Then:
 
-1. `GET /projects/{id}/jira/oauth/start` — open `authorize_url` in a browser
-2. After consent, Atlassian redirects to the callback; tokens are stored per project
-3. If multiple Atlassian sites: `PUT /projects/{id}/jira/cloud` with `{"cloud_id": "..."}`
-4. `GET /integrations/jira/projects?project_id={id}` — list Jira projects
-5. `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}` (also registers dynamic webhooks for issue created/updated/deleted)
-6. `POST /projects/{id}/jira/sync` — upsert team members, sprints, epics, stories, tasks, events
+1. Org **admin/owner**: `GET /organizations/me/jira/oauth/start` — open `authorize_url` in a browser
+2. After consent, tokens are stored once for the organization
+3. If multiple Atlassian sites: `PUT /organizations/me/jira/cloud` with `{"cloud_id": "..."}`
+4. Project **admin+**: `GET /integrations/jira/projects?project_id={id}` — list Jira projects
+5. Project **admin+**: `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}` (registers webhooks for that key)
+6. Project **admin+**: `POST /projects/{id}/jira/sync` — upsert team members, sprints, epics, stories, tasks, events
 
-Dynamic webhooks expire after ~30 days; re-link the Jira project key to re-register. Unlink or disconnect removes the remote webhook.
+Additional Keystone projects in the same org reuse the org Jira connection — only link a different Jira project key.
+
+Dynamic webhooks expire after ~30 days; re-link the Jira project key to re-register. Unlink or org disconnect removes remote webhooks.
 
 ## Project roles
 

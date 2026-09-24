@@ -29,11 +29,14 @@ from app.integrations.jira.sync import sync_jira_project
 from app.integrations.jira.webhooks import (
     handle_issue_webhook,
     register_project_webhook,
+    unregister_org_webhooks,
     unregister_project_webhook,
 )
 from app.models.jira_connection import JiraConnection
+from app.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.models.project import ROLE_RANK, Project, ProjectMember, ProjectRole
 from app.models.user import User
+from app.organizations.dependencies import require_org_member
 from app.projects.dependencies import require_project_member
 from app.schemas.jira import (
     JiraCloudSelectRequest,
@@ -45,6 +48,7 @@ from app.schemas.jira import (
     JiraProjectSummary,
     JiraSyncErrorItem,
     JiraSyncResponse,
+    JiraWebhookSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,27 +68,31 @@ def _require_jira_oauth_configured() -> None:
         )
 
 
-def _get_connection(db: Session, project_id: UUID) -> JiraConnection | None:
-    return db.query(JiraConnection).filter(JiraConnection.project_id == project_id).first()
+def _get_connection(db: Session, organization_id: UUID) -> JiraConnection | None:
+    return (
+        db.query(JiraConnection)
+        .filter(JiraConnection.organization_id == organization_id)
+        .first()
+    )
 
 
-def _require_connection(db: Session, project_id: UUID) -> JiraConnection:
-    connection = _get_connection(db, project_id)
+def _require_connection(db: Session, organization_id: UUID) -> JiraConnection:
+    connection = _get_connection(db, organization_id)
     if connection is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project has no Jira OAuth connection (GET /projects/{id}/jira/oauth/start)",
+            detail="Organization has no Jira OAuth connection (GET /organizations/me/jira/oauth/start)",
         )
     if not connection.cloud_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Jira site not selected (PUT /projects/{id}/jira/cloud)",
+            detail="Jira site not selected (PUT /organizations/me/jira/cloud)",
         )
     return connection
 
 
-def _client_for_project(db: Session, project_id: UUID) -> JiraClient:
-    connection = _require_connection(db, project_id)
+def _client_for_org(db: Session, organization_id: UUID) -> JiraClient:
+    connection = _require_connection(db, organization_id)
     return JiraClient.from_connection(db, connection, get_settings())
 
 
@@ -92,7 +100,6 @@ def _frontend_redirect(status_value: str, **extra: str) -> RedirectResponse:
     settings = get_settings()
     base = settings.jira_oauth_frontend_redirect
     params = {"status": status_value, **extra}
-    # frontend redirect may already end with ?status= — append remaining params carefully
     if base.endswith("status=") or base.endswith("status"):
         url = f"{base}{status_value}"
         rest = {k: v for k, v in extra.items()}
@@ -121,17 +128,31 @@ def _ensure_project_member(db: Session, project_id: UUID, user: User, min_role: 
     return project
 
 
-@router.get("/projects/{project_id}/jira/oauth/start", response_model=JiraOAuthStartResponse)
+def _connection_response(connection: JiraConnection, available: list[JiraCloudSite] | None = None) -> JiraConnectionResponse:
+    needs_site = connection.cloud_id is None
+    return JiraConnectionResponse(
+        connected=True,
+        cloud_id=connection.cloud_id,
+        site_url=connection.site_url,
+        site_name=connection.site_name,
+        token_expires_at=connection.token_expires_at,
+        connected_by=connection.connected_by,
+        needs_site_selection=needs_site,
+        available_sites=available or [],
+    )
+
+
+@router.get("/organizations/me/jira/oauth/start", response_model=JiraOAuthStartResponse)
 def start_jira_oauth(
-    project_membership: Annotated[
-        tuple[Project, ProjectMember],
-        Depends(require_project_member(ProjectRole.admin)),
+    org_bundle: Annotated[
+        tuple[Organization, OrganizationMember],
+        Depends(require_org_member(OrganizationRole.admin)),
     ],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> JiraOAuthStartResponse:
-    project, _ = project_membership
+    organization, _ = org_bundle
     _require_jira_oauth_configured()
-    state = create_oauth_state(project.id, current_user.id)
+    state = create_oauth_state(organization.id, current_user.id)
     return JiraOAuthStartResponse(authorize_url=build_authorize_url(state))
 
 
@@ -150,7 +171,7 @@ def jira_oauth_callback(
     _require_jira_oauth_configured()
     settings = get_settings()
     try:
-        project_id, user_id = parse_oauth_state(state, settings)
+        organization_id, user_id = parse_oauth_state(state, settings)
         token_data = exchange_code(code, settings)
         access_token = token_data["access_token"]
         refresh_token = token_data.get("refresh_token")
@@ -169,10 +190,10 @@ def jira_oauth_callback(
         elif len(resources) > 1:
             needs_site = "1"
 
-        connection = _get_connection(db, project_id)
+        connection = _get_connection(db, organization_id)
         if connection is None:
             connection = JiraConnection(
-                project_id=project_id,
+                organization_id=organization_id,
                 connected_by=user_id,
                 access_token_encrypted=encrypt_token(access_token, settings),
                 refresh_token_encrypted=encrypt_token(refresh_token, settings),
@@ -197,7 +218,7 @@ def jira_oauth_callback(
         db.commit()
         return _frontend_redirect(
             "success",
-            project_id=str(project_id),
+            organization_id=str(organization_id),
             needs_site=needs_site,
         )
     except JiraAPIError as exc:
@@ -208,16 +229,16 @@ def jira_oauth_callback(
         return _frontend_redirect("error", message="oauth_failed")
 
 
-@router.get("/projects/{project_id}/jira/connection", response_model=JiraConnectionResponse)
+@router.get("/organizations/me/jira/connection", response_model=JiraConnectionResponse)
 def get_jira_connection(
-    project_membership: Annotated[
-        tuple[Project, ProjectMember],
-        Depends(require_project_member(ProjectRole.admin)),
+    org_bundle: Annotated[
+        tuple[Organization, OrganizationMember],
+        Depends(require_org_member(OrganizationRole.admin)),
     ],
     db: Annotated[Session, Depends(get_db)],
 ) -> JiraConnectionResponse:
-    project, _ = project_membership
-    connection = _get_connection(db, project.id)
+    organization, _ = org_bundle
+    connection = _get_connection(db, organization.id)
     if connection is None:
         return JiraConnectionResponse(connected=False)
 
@@ -255,52 +276,43 @@ def get_jira_connection(
         except JiraAPIError:
             available = []
 
-    return JiraConnectionResponse(
-        connected=True,
-        cloud_id=connection.cloud_id,
-        site_url=connection.site_url,
-        site_name=connection.site_name,
-        token_expires_at=connection.token_expires_at,
-        connected_by=connection.connected_by,
-        needs_site_selection=needs_site,
-        available_sites=available,
-    )
+    return _connection_response(connection, available)
 
 
-@router.delete("/projects/{project_id}/jira/connection", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/organizations/me/jira/connection", status_code=status.HTTP_204_NO_CONTENT)
 def disconnect_jira(
-    project_membership: Annotated[
-        tuple[Project, ProjectMember],
-        Depends(require_project_member(ProjectRole.admin)),
+    org_bundle: Annotated[
+        tuple[Organization, OrganizationMember],
+        Depends(require_org_member(OrganizationRole.admin)),
     ],
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
-    project, _ = project_membership
-    connection = _get_connection(db, project.id)
+    organization, _ = org_bundle
+    connection = _get_connection(db, organization.id)
     if connection:
         try:
-            unregister_project_webhook(db, connection)
+            unregister_org_webhooks(db, organization.id, connection)
         except JiraAPIError:
             pass
         db.delete(connection)
         db.commit()
 
 
-@router.put("/projects/{project_id}/jira/cloud", response_model=JiraConnectionResponse)
+@router.put("/organizations/me/jira/cloud", response_model=JiraConnectionResponse)
 def select_jira_cloud(
     payload: JiraCloudSelectRequest,
-    project_membership: Annotated[
-        tuple[Project, ProjectMember],
-        Depends(require_project_member(ProjectRole.admin)),
+    org_bundle: Annotated[
+        tuple[Organization, OrganizationMember],
+        Depends(require_org_member(OrganizationRole.admin)),
     ],
     db: Annotated[Session, Depends(get_db)],
 ) -> JiraConnectionResponse:
-    project, _ = project_membership
-    connection = _get_connection(db, project.id)
+    organization, _ = org_bundle
+    connection = _get_connection(db, organization.id)
     if connection is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project has no Jira OAuth connection",
+            detail="Organization has no Jira OAuth connection",
         )
 
     settings = get_settings()
@@ -319,43 +331,43 @@ def select_jira_cloud(
     db.add(connection)
     db.flush()
 
-    if project.jira_project_key:
+    linked = (
+        db.query(Project)
+        .filter(
+            Project.organization_id == organization.id,
+            Project.jira_project_key.isnot(None),
+        )
+        .all()
+    )
+    for project in linked:
+        if not project.jira_project_key:
+            continue
         try:
             register_project_webhook(db, project, connection, project.jira_project_key, settings)
         except JiraAPIError as exc:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to register Jira webhook: {exc}",
+                detail=f"Failed to register Jira webhook for {project.jira_project_key}: {exc}",
             ) from exc
 
     db.commit()
     db.refresh(connection)
-
-    return JiraConnectionResponse(
-        connected=True,
-        cloud_id=connection.cloud_id,
-        site_url=connection.site_url,
-        site_name=connection.site_name,
-        token_expires_at=connection.token_expires_at,
-        connected_by=connection.connected_by,
-        needs_site_selection=False,
-        available_sites=[],
-    )
+    return _connection_response(connection)
 
 
 @router.get("/integrations/jira/projects", response_model=list[JiraProjectSummary])
 def list_jira_projects(
-    project_id: Annotated[UUID, Query(description="Keystone project whose OAuth connection to use")],
+    project_id: Annotated[UUID, Query(description="Keystone project (uses its org Jira connection)")],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[JiraProjectSummary]:
-    _ensure_project_member(db, project_id, current_user, ProjectRole.member)
+    project = _ensure_project_member(db, project_id, current_user, ProjectRole.member)
     _require_jira_oauth_configured()
     try:
-        with _client_for_project(db, project_id) as client:
+        with _client_for_org(db, project.organization_id) as client:
             projects = client.list_projects()
-            db.commit()  # persist any token refresh
+            db.commit()
     except JiraAPIError as exc:
         db.rollback()
         if exc.status_code in (401, 403):
@@ -392,10 +404,10 @@ def link_jira_project(
     key = (payload.jira_project_key or "").strip() or None
 
     if key is None:
-        connection = _get_connection(db, project.id)
+        connection = _get_connection(db, project.organization_id)
         if connection:
             try:
-                unregister_project_webhook(db, connection)
+                unregister_project_webhook(db, project, connection)
             except JiraAPIError:
                 pass
         project.jira_project_key = None
@@ -410,9 +422,9 @@ def link_jira_project(
         )
 
     _require_jira_oauth_configured()
-    connection = _require_connection(db, project.id)
+    connection = _require_connection(db, project.organization_id)
     try:
-        with _client_for_project(db, project.id) as client:
+        with _client_for_org(db, project.organization_id) as client:
             jira_project = client.get_project(key)
             db.flush()
     except JiraAPIError as exc:
@@ -433,13 +445,17 @@ def link_jira_project(
 
     conflict = (
         db.query(Project)
-        .filter(Project.jira_project_key == key, Project.id != project.id)
+        .filter(
+            Project.organization_id == project.organization_id,
+            Project.jira_project_key == key,
+            Project.id != project.id,
+        )
         .first()
     )
     if conflict:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Jira project '{key}' is already linked to another Keystone project",
+            detail=f"Jira project '{key}' is already linked to another Keystone project in this organization",
         )
 
     project.jira_project_key = str(jira_project.get("key") or key)
@@ -477,10 +493,9 @@ def receive_jira_webhook(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    connection = _get_connection(db, project_id)
-    if connection is None or not connection.webhook_secret:
+    if not project.webhook_secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Webhook not registered")
-    if not token or token != connection.webhook_secret:
+    if not token or token != project.webhook_secret:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
 
     try:
@@ -488,7 +503,6 @@ def receive_jira_webhook(
     except Exception:
         db.rollback()
         logger.exception("Failed handling Jira webhook for project %s", project_id)
-        # Acknowledge to avoid aggressive retries for bad payloads we already accepted
         return {"status": "error"}
 
     return {"status": "ok"}
@@ -510,7 +524,7 @@ def sync_project_from_jira(
         )
 
     _require_jira_oauth_configured()
-    _require_connection(db, project.id)
+    _require_connection(db, project.organization_id)
     try:
         result = sync_jira_project(db, project)
     except JiraAPIError as exc:
@@ -548,3 +562,39 @@ def sync_project_from_jira(
             JiraSyncErrorItem(entity=e.entity, key=e.key, message=e.message) for e in result.errors
         ],
     )
+
+
+@router.get("/integrations/jira/webhooks", response_model=list[JiraWebhookSummary])
+def list_jira_webhooks(
+    project_id: Annotated[UUID, Query(description="Keystone project (uses its org Jira connection)")],
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[JiraWebhookSummary]:
+    project = _ensure_project_member(db, project_id, current_user, ProjectRole.member)
+    _require_jira_oauth_configured()
+    try:
+        with _client_for_org(db, project.organization_id) as client:
+            webhooks = client.list_webhooks()
+            db.commit()
+    except JiraAPIError as exc:
+        db.rollback()
+        if exc.status_code in (401, 403):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Jira auth failed; reconnect OAuth",
+            ) from exc
+        if exc.status_code == 400:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    return [
+        JiraWebhookSummary(
+            id=str(w.get("id")),
+            url=str(w.get("url")),
+            events=[str(e) for e in (w.get("events") or [])],
+            jql_filter=str(w.get("jqlFilter")) if w.get("jqlFilter") is not None else None,
+            expiration_date=str(w.get("expirationDate")) if w.get("expirationDate") is not None else None,
+        )
+        for w in webhooks
+        if w.get("id") is not None and w.get("url")
+    ]

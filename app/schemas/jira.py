@@ -66,3 +66,11 @@ class JiraConnectionResponse(BaseModel):
     connected_by: uuid.UUID | None = None
     needs_site_selection: bool = False
     available_sites: list[JiraCloudSite] = Field(default_factory=list)
+
+
+class JiraWebhookSummary(BaseModel):
+    id: str
+    url: str
+    events: list[str] = Field(default_factory=list)
+    jql_filter: str | None = None
+    expiration_date: str | None = None

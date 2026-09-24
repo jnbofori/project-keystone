@@ -12,6 +12,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.document import Document
+    from app.models.organization import OrganizationMember
     from app.models.project import ProjectMember
     from app.models.query_log import QueryLog
     from app.models.team_member import TeamMember
@@ -26,6 +27,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     memberships: Mapped[list["ProjectMember"]] = relationship(back_populates="user")
+    organization_membership: Mapped["OrganizationMember | None"] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
     documents: Mapped[list["Document"]] = relationship(back_populates="uploader")
     query_logs: Mapped[list["QueryLog"]] = relationship(back_populates="user")
     team_memberships: Mapped[list["TeamMember"]] = relationship(back_populates="user")
