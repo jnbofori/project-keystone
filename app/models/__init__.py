@@ -23,6 +23,7 @@ from app.models.pull_request import PullRequest
 from app.models.query_log import QueryLog
 from app.models.risk import Risk
 from app.models.sprint import Sprint
+from app.models.sprint_requirement_baseline import SprintRequirementBaseline
 from app.models.story import Story
 from app.models.task import Task, TaskDependency
 from app.models.team_member import TeamMember
@@ -41,6 +42,7 @@ __all__ = [
     "QueryLog",
     "TeamMember",
     "Sprint",
+    "SprintRequirementBaseline",
     "Epic",
     "Story",
     "Task",

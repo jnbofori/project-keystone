@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,10 +19,12 @@ from app.integrations.jira.mappers import (
     map_task_status,
     parse_jira_datetime,
 )
-from app.models.enums import IntegrationSource, TaskStatus
+from app.models.enums import EntityType, IntegrationSource, ProjectEventType, SprintStatus, TaskStatus
 from app.models.epic import Epic
 from app.models.project import Project
+from app.models.project_event import ProjectEvent
 from app.models.sprint import Sprint
+from app.models.sprint_requirement_baseline import SprintRequirementBaseline
 from app.models.story import Story
 from app.models.task import Task, TaskDependency
 from app.models.team_member import TeamMember
@@ -65,6 +68,15 @@ def story_points(fields: dict[str, Any], story_points_field: str | None) -> int 
         return None
 
 
+def acceptance_criteria_text(
+    fields: dict[str, Any],
+    acceptance_criteria_field: str | None,
+) -> str | None:
+    if not acceptance_criteria_field:
+        return None
+    return adf_to_text(fields.get(acceptance_criteria_field))
+
+
 def resolve_sprint_id(fields: dict[str, Any], sprints_by_jira_id: dict[str, Sprint]) -> uuid.UUID | None:
     for sprint_id in reversed(extract_sprint_ids(fields)):
         sprint = sprints_by_jira_id.get(sprint_id)
@@ -86,6 +98,44 @@ def resolve_epic_id(fields: dict[str, Any], epics_by_key: dict[str, Epic]) -> uu
         if epic:
             return epic.id
     return None
+
+
+def ensure_requirement_baseline(
+    db: Session,
+    *,
+    sprint: Sprint | None,
+    entity_type: EntityType,
+    entity_id: uuid.UUID,
+    title: str,
+    description: str | None,
+    acceptance_criteria: str | None,
+    story_points_value: int | None,
+) -> None:
+    """Freeze planning text the first time an issue is seen on an active sprint."""
+    if sprint is None or sprint.status != SprintStatus.active or entity_id is None:
+        return
+    exists = (
+        db.query(SprintRequirementBaseline.id)
+        .filter(
+            SprintRequirementBaseline.sprint_id == sprint.id,
+            SprintRequirementBaseline.entity_type == entity_type,
+            SprintRequirementBaseline.entity_id == entity_id,
+        )
+        .first()
+    )
+    if exists:
+        return
+    db.add(
+        SprintRequirementBaseline(
+            sprint_id=sprint.id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            title=title,
+            description=description,
+            acceptance_criteria=acceptance_criteria,
+            story_points=story_points_value,
+        )
+    )
 
 
 def upsert_epic(
@@ -130,12 +180,14 @@ def upsert_story(
     sprints_by_jira_id: dict[str, Sprint],
     story_points_field: str | None,
     flagged_field: str | None = None,
+    acceptance_criteria_field: str | None = None,
 ) -> Story:
     key = issue["key"]
     fields = issue.get("fields") or {}
     story = stories_by_key.get(key)
     title = fields.get("summary") or key
     description = adf_to_text(fields.get("description"))
+    ac_text = acceptance_criteria_text(fields, acceptance_criteria_field)
     status = map_story_status(fields.get("status"))
     priority = map_task_priority(fields.get("priority"))
     points = story_points(fields, story_points_field)
@@ -143,6 +195,9 @@ def upsert_story(
     epic_id = resolve_epic_id(fields, epics_by_key)
     sprint_id = resolve_sprint_id(fields, sprints_by_jira_id)
     flagged = is_flagged_impediment(fields, flagged_field)
+    sprint = None
+    if sprint_id:
+        sprint = next((s for s in sprints_by_jira_id.values() if s.id == sprint_id), None)
 
     if story is None:
         story = Story(
@@ -151,6 +206,7 @@ def upsert_story(
             source=IntegrationSource.jira,
             title=title,
             description=description,
+            acceptance_criteria=ac_text,
             status=status,
             priority=priority,
             story_points=points,
@@ -164,6 +220,7 @@ def upsert_story(
     else:
         story.title = title
         story.description = description
+        story.acceptance_criteria = ac_text
         story.status = status
         story.priority = priority
         story.story_points = points
@@ -171,6 +228,18 @@ def upsert_story(
         story.epic_id = epic_id
         story.sprint_id = sprint_id
         story.assignee_id = assignee_id
+
+    db.flush()
+    ensure_requirement_baseline(
+        db,
+        sprint=sprint,
+        entity_type=EntityType.story,
+        entity_id=story.id,
+        title=title,
+        description=description,
+        acceptance_criteria=ac_text,
+        story_points_value=points,
+    )
     return story
 
 
@@ -186,12 +255,14 @@ def upsert_task(
     sprints_by_jira_id: dict[str, Sprint],
     story_points_field: str | None,
     flagged_field: str | None = None,
+    acceptance_criteria_field: str | None = None,
 ) -> Task:
     key = issue["key"]
     fields = issue.get("fields") or {}
     task = tasks_by_key.get(key)
     title = fields.get("summary") or key
     description = adf_to_text(fields.get("description"))
+    ac_text = acceptance_criteria_text(fields, acceptance_criteria_field)
     status = map_task_status(fields.get("status"))
     priority = map_task_priority(fields.get("priority"))
     points = story_points(fields, story_points_field)
@@ -199,6 +270,9 @@ def upsert_task(
     epic_id = resolve_epic_id(fields, epics_by_key)
     sprint_id = resolve_sprint_id(fields, sprints_by_jira_id)
     flagged = is_flagged_impediment(fields, flagged_field)
+    sprint = None
+    if sprint_id:
+        sprint = next((s for s in sprints_by_jira_id.values() if s.id == sprint_id), None)
 
     story_id = None
     parent_key = extract_parent_key(fields)
@@ -221,6 +295,7 @@ def upsert_task(
             source=IntegrationSource.jira,
             title=title,
             description=description,
+            acceptance_criteria=ac_text,
             status=status,
             priority=priority,
             story_points=points,
@@ -240,6 +315,7 @@ def upsert_task(
     else:
         task.title = title
         task.description = description
+        task.acceptance_criteria = ac_text
         task.status = status
         task.priority = priority
         task.story_points = points
@@ -252,6 +328,18 @@ def upsert_task(
         task.completed_at = completed_at
         if started_at and not task.started_at:
             task.started_at = started_at
+
+    db.flush()
+    ensure_requirement_baseline(
+        db,
+        sprint=sprint,
+        entity_type=EntityType.task,
+        entity_id=task.id,
+        title=title,
+        description=description,
+        acceptance_criteria=ac_text,
+        story_points_value=points,
+    )
     return task
 
 
@@ -260,6 +348,8 @@ def sync_task_dependencies(
     task: Task,
     issue: dict[str, Any],
     tasks_by_key: dict[str, Task],
+    *,
+    project: Project | None = None,
 ) -> None:
     """Replace outgoing TaskDependency rows from Jira Blocks / is blocked by links."""
     db.flush()
@@ -269,11 +359,17 @@ def sync_task_dependencies(
     fields = issue.get("fields") or {}
     depends_on_keys = extract_blocked_by_keys(fields)
 
+    old_deps = {
+        row.depends_on_task_id
+        for row in db.query(TaskDependency).filter(TaskDependency.task_id == task.id).all()
+    }
+
     db.query(TaskDependency).filter(TaskDependency.task_id == task.id).delete(
         synchronize_session=False
     )
 
     seen: set[uuid.UUID] = set()
+    new_dep_ids: list[uuid.UUID] = []
     for key in depends_on_keys:
         depends_on = tasks_by_key.get(key)
         if depends_on is None or depends_on.id is None:
@@ -282,3 +378,48 @@ def sync_task_dependencies(
             continue
         seen.add(depends_on.id)
         db.add(TaskDependency(task_id=task.id, depends_on_task_id=depends_on.id))
+        if depends_on.id not in old_deps:
+            new_dep_ids.append(depends_on.id)
+
+    if not new_dep_ids or project is None:
+        return
+
+    sprint = None
+    if task.sprint_id:
+        sprint = db.query(Sprint).filter(Sprint.id == task.sprint_id).first()
+    if sprint is None or sprint.status != SprintStatus.active:
+        return
+    starts = sprint.starts_at
+    if starts is None:
+        return
+    if starts.tzinfo is None:
+        starts = starts.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
+    if now < starts:
+        return
+
+    for depends_on_id in new_dep_ids:
+        external_key = f"{task.external_key or task.id}:dep:{depends_on_id}"
+        exists = (
+            db.query(ProjectEvent.id)
+            .filter(
+                ProjectEvent.project_id == project.id,
+                ProjectEvent.external_key == external_key,
+            )
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            ProjectEvent(
+                project_id=project.id,
+                type=ProjectEventType.DependencyAdded,
+                source=IntegrationSource.jira,
+                entity_type=EntityType.task,
+                entity_id=task.id,
+                external_key=external_key,
+                external_entity_key=task.external_key,
+                timestamp=now,
+                metadata_={"depends_on_task_id": str(depends_on_id)},
+            )
+        )

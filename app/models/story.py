@@ -42,6 +42,7 @@ class Story(Base):
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[StoryStatus] = mapped_column(
         Enum(StoryStatus, name="story_status"),
         default=StoryStatus.todo,

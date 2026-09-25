@@ -43,6 +43,18 @@ function formatRiskLevel(level: string | null | undefined): string {
   return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
+const scopeSignalCaption = computed(() => {
+  const scope = dashboard.value?.risk_indicators?.scope;
+  if (!scope) return '';
+  const parts: string[] = [];
+  if (scope.issues_added) parts.push(`+${scope.issues_added} added`);
+  if (scope.issues_removed) parts.push(`−${scope.issues_removed} removed`);
+  if (scope.semantic_expansions) parts.push(`${scope.semantic_expansions} req. expansions`);
+  if (scope.new_dependencies) parts.push(`${scope.new_dependencies} new deps`);
+  if (scope.points_increased_events) parts.push(`${scope.points_increased_events} points↑`);
+  return parts.join(' · ');
+});
+
 const insightParagraphs = computed(() => {
   const text = insights.value?.insight?.trim();
   if (!text) return [];
@@ -277,15 +289,25 @@ defineExpose({ reload: load });
           <v-col cols="12" md="4">
             <v-card variant="outlined" class="h-100">
               <v-card-text>
-                <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
                   <div class="text-body-2 text-medium-emphasis">Scope</div>
-                  <v-chip
-                    size="small"
-                    variant="tonal"
-                    :color="riskLevelColor(dashboard.risk_indicators.scope.level)"
-                  >
-                    {{ formatRiskLevel(dashboard.risk_indicators.scope.level) }}
-                  </v-chip>
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip
+                      v-if="dashboard.risk_indicators.scope.creep_detected"
+                      size="small"
+                      variant="tonal"
+                      color="warning"
+                    >
+                      Scope creep detected
+                    </v-chip>
+                    <v-chip
+                      size="small"
+                      variant="tonal"
+                      :color="riskLevelColor(dashboard.risk_indicators.scope.level)"
+                    >
+                      {{ formatRiskLevel(dashboard.risk_indicators.scope.level) }}
+                    </v-chip>
+                  </div>
                 </div>
                 <div class="text-h5 mb-1">
                   {{
@@ -294,10 +316,19 @@ defineExpose({ reload: load });
                       : '—'
                   }}
                 </div>
-                <div class="text-caption text-medium-emphasis">
+                <div class="text-caption text-medium-emphasis mb-1">
                   {{ formatPoints(dashboard.risk_indicators.scope.baseline_points) }}
                   → {{ formatPoints(dashboard.risk_indicators.scope.current_points) }} pts
                   (+{{ formatPoints(dashboard.risk_indicators.scope.scope_added_points) }} mid-sprint)
+                </div>
+                <div
+                  v-if="dashboard.risk_indicators.scope.summary"
+                  class="text-body-2 mb-1"
+                >
+                  {{ dashboard.risk_indicators.scope.summary }}
+                </div>
+                <div v-if="scopeSignalCaption" class="text-caption text-medium-emphasis">
+                  {{ scopeSignalCaption }}
                 </div>
               </v-card-text>
             </v-card>

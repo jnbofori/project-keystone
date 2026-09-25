@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     jira_oauth_frontend_redirect: str = "http://localhost:5173/settings/jira?status="
     jira_token_encryption_key: str = ""
     jira_story_points_field: str = ""
+    jira_acceptance_criteria_field: str = ""
     jira_webhook_base_url: str = ""
 
     @property

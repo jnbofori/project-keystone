@@ -85,6 +85,7 @@ def sync_jira_project(
         story_points_field = client.resolve_story_points_field()
         sprint_field = client.resolve_sprint_field()
         flagged_field = client.resolve_flagged_field()
+        acceptance_criteria_field = client.resolve_acceptance_criteria_field()
         epics_by_key, stories_by_key, tasks_by_key = _sync_issues(
             client,
             db,
@@ -95,6 +96,7 @@ def sync_jira_project(
             story_points_field=story_points_field,
             sprint_field=sprint_field,
             flagged_field=flagged_field,
+            acceptance_criteria_field=acceptance_criteria_field,
         )
         _sync_events(
             client,
@@ -280,6 +282,7 @@ def _sync_issues(
     story_points_field: str | None,
     sprint_field: str,
     flagged_field: str | None = None,
+    acceptance_criteria_field: str | None = None,
 ) -> tuple[dict[str, Epic], dict[str, Story], dict[str, Task]]:
     fields = [
         "summary",
@@ -303,6 +306,8 @@ def _sync_issues(
         fields.append(sprint_field)
     if flagged_field and flagged_field not in fields:
         fields.append(flagged_field)
+    if acceptance_criteria_field and acceptance_criteria_field not in fields:
+        fields.append(acceptance_criteria_field)
 
     jql = f'project = "{project.jira_project_key}" ORDER BY created ASC'
     try:
@@ -368,6 +373,7 @@ def _sync_issues(
                 sprints_by_jira_id=sprints_by_jira_id,
                 story_points_field=story_points_field,
                 flagged_field=flagged_field,
+                acceptance_criteria_field=acceptance_criteria_field,
             )
             result.stories += 1
         except Exception as exc:  # noqa: BLE001
@@ -392,6 +398,7 @@ def _sync_issues(
                 sprints_by_jira_id=sprints_by_jira_id,
                 story_points_field=story_points_field,
                 flagged_field=flagged_field,
+                acceptance_criteria_field=acceptance_criteria_field,
             )
             result.tasks += 1
         except Exception as exc:  # noqa: BLE001
@@ -409,7 +416,7 @@ def _sync_issues(
         if task is None:
             continue
         try:
-            _sync_task_dependencies(db, task, issue, tasks_by_key)
+            _sync_task_dependencies(db, task, issue, tasks_by_key, project=project)
         except Exception as exc:  # noqa: BLE001
             result.errors.append(SyncError("task_dependency", key, str(exc)))
             logger.exception("Failed to sync dependencies for %s", key)

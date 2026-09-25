@@ -344,6 +344,7 @@ def handle_issue_webhook(
         db, project
     )
     story_points_field = settings.jira_story_points_field.strip() or None
+    acceptance_criteria_field = settings.jira_acceptance_criteria_field.strip() or None
     kind = classify_issue(issue)
 
     if kind == "epic":
@@ -358,6 +359,7 @@ def handle_issue_webhook(
             members_by_account=members_by_account,
             sprints_by_jira_id=sprints_by_jira_id,
             story_points_field=story_points_field,
+            acceptance_criteria_field=acceptance_criteria_field,
         )
     else:
         task = upsert_task(
@@ -370,8 +372,9 @@ def handle_issue_webhook(
             members_by_account=members_by_account,
             sprints_by_jira_id=sprints_by_jira_id,
             story_points_field=story_points_field,
+            acceptance_criteria_field=acceptance_criteria_field,
         )
-        sync_task_dependencies(db, task, issue, tasks_by_key)
+        sync_task_dependencies(db, task, issue, tasks_by_key, project=project)
     db.commit()
 
 

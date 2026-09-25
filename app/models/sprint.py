@@ -13,6 +13,7 @@ from app.models.enums import IntegrationSource, SprintStatus
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.sprint_requirement_baseline import SprintRequirementBaseline
     from app.models.story import Story
     from app.models.task import Task
 
@@ -56,3 +57,7 @@ class Sprint(Base):
     project: Mapped["Project"] = relationship(back_populates="sprints")
     stories: Mapped[list["Story"]] = relationship(back_populates="sprint")
     tasks: Mapped[list["Task"]] = relationship(back_populates="sprint")
+    requirement_baselines: Mapped[list["SprintRequirementBaseline"]] = relationship(
+        back_populates="sprint",
+        cascade="all, delete-orphan",
+    )

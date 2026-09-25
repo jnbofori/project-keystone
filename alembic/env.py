@@ -18,6 +18,7 @@ from app.models import (  # noqa: F401
     QueryLog,
     Risk,
     Sprint,
+    SprintRequirementBaseline,
     Story,
     Task,
     TaskDependency,

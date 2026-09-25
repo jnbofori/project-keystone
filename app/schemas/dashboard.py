@@ -54,12 +54,28 @@ class DeliveryRiskIndicator(BaseModel):
     remaining_points: float = 0
 
 
+class ScopeRiskDriver(BaseModel):
+    kind: str
+    title: str
+    detail: str
+
+
 class ScopeRiskIndicator(BaseModel):
     level: str | None = None
     baseline_points: float = 0
     current_points: float = 0
     scope_added_points: float = 0
     scope_growth_percent: float | None = None
+    creep_detected: bool = False
+    summary: str | None = None
+    issues_added: int = 0
+    issues_removed: int = 0
+    points_increased_events: int = 0
+    requirement_changes: int = 0
+    semantic_expansions: int = 0
+    new_dependencies: int = 0
+    deadlines_unchanged: bool = False
+    drivers: list[ScopeRiskDriver] = Field(default_factory=list)
 
 
 class DependencyRiskExample(BaseModel):

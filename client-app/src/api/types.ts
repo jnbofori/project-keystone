@@ -203,12 +203,28 @@ export interface DeliveryRiskIndicator {
   remaining_points: number;
 }
 
+export interface ScopeRiskDriver {
+  kind: string;
+  title: string;
+  detail: string;
+}
+
 export interface ScopeRiskIndicator {
   level: string | null;
   baseline_points: number;
   current_points: number;
   scope_added_points: number;
   scope_growth_percent: number | null;
+  creep_detected: boolean;
+  summary: string | null;
+  issues_added: number;
+  issues_removed: number;
+  points_increased_events: number;
+  requirement_changes: number;
+  semantic_expansions: number;
+  new_dependencies: number;
+  deadlines_unchanged: boolean;
+  drivers: ScopeRiskDriver[];
 }
 
 export interface DependencyRiskExample {

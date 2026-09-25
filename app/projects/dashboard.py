@@ -18,6 +18,7 @@ from app.models.enums import (
 from app.models.epic import Epic
 from app.models.project_event import ProjectEvent
 from app.models.sprint import Sprint
+from app.models.sprint_requirement_baseline import SprintRequirementBaseline
 from app.models.story import Story
 from app.models.task import Task, TaskDependency
 from app.models.team_member import TeamMember
@@ -39,6 +40,7 @@ from app.schemas.dashboard import (
     DependencyRiskExample,
     DependencyRiskIndicator,
     ProjectDashboardResponse,
+    ScopeRiskDriver,
     ScopeRiskIndicator,
 )
 
@@ -46,6 +48,10 @@ AGING_WIP_DAYS = 3.0
 STALE_BLOCKED_DAYS = 2.0
 PACE_TOLERANCE = 10.0
 DEPENDENCY_DUE_SOON_DAYS = 2.0
+SEMANTIC_SIMILARITY_THRESHOLD = 0.85
+MAX_SEMANTIC_PAIRS = 15
+SCOPE_CREEP_GROWTH_PCT = 25.0
+SCOPE_CREEP_ISSUES_ADDED = 3
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -413,7 +419,102 @@ def _compute_delivery_indicator(
     )
 
 
+def _requirement_text(description: str | None, acceptance_criteria: str | None) -> str:
+    parts = [p.strip() for p in (description or "", acceptance_criteria or "") if p and p.strip()]
+    return "\n\n".join(parts).strip()
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 1.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 1.0
+    return float(dot / (na * nb))
+
+
+def _parse_points(value: str | None) -> float | None:
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
+
+
+def _sprint_label_match(blob: str | None, sprint: Sprint) -> bool:
+    text = (blob or "").strip().lower()
+    if not text:
+        return False
+    if sprint.name and sprint.name.strip().lower() in text:
+        return True
+    if sprint.external_key and sprint.external_key.strip().lower() in text:
+        return True
+    return False
+
+
+def _count_semantic_expansions(
+    pairs: list[tuple[str, str, str]],
+) -> tuple[int, list[ScopeRiskDriver]]:
+    """pairs: (title, baseline_text, current_text). Returns count + drivers."""
+    if not pairs:
+        return 0, []
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not settings.openai_api_key.strip():
+        return 0, []
+
+    try:
+        from llama_index.embeddings.openai import OpenAIEmbedding
+
+        embed_model = OpenAIEmbedding(
+            model=settings.openai_embedding_model,
+            api_key=settings.openai_api_key,
+        )
+    except Exception:
+        return 0, []
+
+    expansions = 0
+    drivers: list[ScopeRiskDriver] = []
+    for title, baseline, current in pairs[:MAX_SEMANTIC_PAIRS]:
+        if not baseline or not current or baseline == current:
+            continue
+        if len(current) <= len(baseline):
+            # Prefer expansions that grow the requirement text
+            continue
+        try:
+            vecs = embed_model.get_text_embedding_batch([baseline, current])
+            if len(vecs) < 2:
+                continue
+            sim = _cosine_similarity(list(vecs[0]), list(vecs[1]))
+        except Exception:
+            continue
+        if sim < SEMANTIC_SIMILARITY_THRESHOLD:
+            expansions += 1
+            if len(drivers) < 3:
+                drivers.append(
+                    ScopeRiskDriver(
+                        kind="semantic_expansion",
+                        title=title,
+                        detail=(
+                            f"Requirement text diverged from sprint baseline "
+                            f"(similarity {sim:.2f})"
+                        ),
+                    )
+                )
+    return expansions, drivers
+
+
 def _compute_scope_indicator(
+    db: Session,
+    project_id: uuid.UUID,
+    sprint: Sprint,
+    stories: list[Story],
+    tasks: list[Task],
     progress: DashboardProgress,
     scope_added_points: float,
 ) -> ScopeRiskIndicator:
@@ -423,12 +524,229 @@ def _compute_scope_indicator(
     if baseline > 0:
         growth = round((current - baseline) / baseline * 100.0, 1)
 
+    starts = _aware(sprint.starts_at)
+    ends = _aware(sprint.ends_at) or _now()
+    window_start = starts or _aware(sprint.created_at) or _now()
+
+    story_ids = {s.id for s in stories}
+    task_ids = {t.id for t in tasks}
+    stories_by_id = {s.id: s for s in stories}
+    tasks_by_id = {t.id: t for t in tasks}
+
+    events = (
+        db.query(ProjectEvent)
+        .filter(
+            ProjectEvent.project_id == project_id,
+            ProjectEvent.timestamp >= window_start,
+            ProjectEvent.timestamp <= ends,
+            ProjectEvent.type.in_(
+                [
+                    ProjectEventType.ScopeChanged,
+                    ProjectEventType.StoryCreated,
+                    ProjectEventType.TaskCreated,
+                    ProjectEventType.StoryPointsChanged,
+                    ProjectEventType.RequirementAdded,
+                    ProjectEventType.DependencyAdded,
+                    ProjectEventType.DeadlineChanged,
+                ]
+            ),
+        )
+        .all()
+    )
+
+    issues_added = 0
+    issues_removed = 0
+    points_increased_events = 0
+    requirement_changes = 0
+    new_dependencies = 0
+    deadline_changed_entities: set[uuid.UUID] = set()
+    affected_entities: set[uuid.UUID] = set()
+    drivers: list[ScopeRiskDriver] = []
+    added_titles: list[tuple[datetime, str]] = []
+
+    for event in events:
+        meta = event.metadata_ or {}
+        entity_id = event.entity_id
+
+        if event.type == ProjectEventType.ScopeChanged:
+            from_s = meta.get("from") if isinstance(meta.get("from"), str) else None
+            to_s = meta.get("to") if isinstance(meta.get("to"), str) else None
+            was_in = _sprint_label_match(from_s, sprint)
+            now_in = _sprint_label_match(to_s, sprint)
+            if now_in and not was_in:
+                issues_added += 1
+                if entity_id:
+                    affected_entities.add(entity_id)
+                title = None
+                if entity_id and entity_id in stories_by_id:
+                    title = stories_by_id[entity_id].title
+                elif entity_id and entity_id in tasks_by_id:
+                    title = tasks_by_id[entity_id].title
+                if title:
+                    added_titles.append((_aware(event.timestamp) or window_start, title))
+            elif was_in and not now_in:
+                issues_removed += 1
+                if entity_id:
+                    affected_entities.add(entity_id)
+
+        elif event.type == ProjectEventType.StoryCreated and entity_id in story_ids:
+            issues_added += 1
+            affected_entities.add(entity_id)
+            added_titles.append(
+                (_aware(event.timestamp) or window_start, stories_by_id[entity_id].title)
+            )
+
+        elif event.type == ProjectEventType.TaskCreated and entity_id in task_ids:
+            # Prefer story-level adds when using story points
+            if _use_story_points(stories):
+                continue
+            issues_added += 1
+            affected_entities.add(entity_id)
+            added_titles.append(
+                (_aware(event.timestamp) or window_start, tasks_by_id[entity_id].title)
+            )
+
+        elif event.type == ProjectEventType.StoryPointsChanged:
+            from_pts = _parse_points(meta.get("from") if isinstance(meta.get("from"), str) else None)
+            to_pts = _parse_points(meta.get("to") if isinstance(meta.get("to"), str) else None)
+            if from_pts is not None and to_pts is not None and to_pts > from_pts:
+                points_increased_events += 1
+                if entity_id:
+                    affected_entities.add(entity_id)
+                title = None
+                if entity_id and entity_id in stories_by_id:
+                    title = stories_by_id[entity_id].title
+                elif entity_id and entity_id in tasks_by_id:
+                    title = tasks_by_id[entity_id].title
+                if title and len(drivers) < 3:
+                    drivers.append(
+                        ScopeRiskDriver(
+                            kind="points_increased",
+                            title=title,
+                            detail=f"Story points increased from {from_pts:g} to {to_pts:g}",
+                        )
+                    )
+
+        elif event.type == ProjectEventType.RequirementAdded:
+            requirement_changes += 1
+            if entity_id:
+                affected_entities.add(entity_id)
+
+        elif event.type == ProjectEventType.DependencyAdded:
+            new_dependencies += 1
+            if entity_id:
+                affected_entities.add(entity_id)
+
+        elif event.type == ProjectEventType.DeadlineChanged and entity_id:
+            deadline_changed_entities.add(entity_id)
+
+    # Semantic expansions vs sprint baselines
+    baselines = (
+        db.query(SprintRequirementBaseline)
+        .filter(SprintRequirementBaseline.sprint_id == sprint.id)
+        .all()
+    )
+    semantic_pairs: list[tuple[str, str, str]] = []
+    for bl in baselines:
+        current_desc: str | None = None
+        current_ac: str | None = None
+        title = bl.title
+        if bl.entity_type == EntityType.story:
+            story = stories_by_id.get(bl.entity_id) or db.query(Story).filter(Story.id == bl.entity_id).first()
+            if story is None:
+                continue
+            title = story.title
+            current_desc = story.description
+            current_ac = story.acceptance_criteria
+        elif bl.entity_type == EntityType.task:
+            task = tasks_by_id.get(bl.entity_id) or db.query(Task).filter(Task.id == bl.entity_id).first()
+            if task is None:
+                continue
+            title = task.title
+            current_desc = task.description
+            current_ac = task.acceptance_criteria
+        else:
+            continue
+
+        baseline_text = _requirement_text(bl.description, bl.acceptance_criteria)
+        current_text = _requirement_text(current_desc, current_ac)
+        if baseline_text and current_text and baseline_text != current_text:
+            semantic_pairs.append((title, baseline_text, current_text))
+
+    semantic_expansions, semantic_drivers = _count_semantic_expansions(semantic_pairs)
+    for driver in semantic_drivers:
+        if len(drivers) < 3:
+            drivers.append(driver)
+
+    # Prefer added-issue drivers when growth is the story
+    added_titles.sort(key=lambda item: item[0])
+    for ts, title in added_titles[:3]:
+        if len(drivers) >= 3:
+            break
+        days_after = max(int((ts - window_start).total_seconds() // 86400), 0) if starts else 0
+        detail = (
+            f"Added {days_after} day{'s' if days_after != 1 else ''} after the sprint began"
+            if starts
+            else "Added mid-sprint"
+        )
+        if not any(d.title == title and d.kind == "issue_added" for d in drivers):
+            drivers.insert(
+                0,
+                ScopeRiskDriver(kind="issue_added", title=title, detail=detail),
+            )
+    drivers = drivers[:3]
+
+    deadlines_unchanged = False
+    has_creep_signal = (
+        (growth is not None and growth >= SCOPE_CREEP_GROWTH_PCT)
+        or semantic_expansions > 0
+        or (issues_added >= SCOPE_CREEP_ISSUES_ADDED and issues_added > issues_removed)
+        or points_increased_events > 0
+        or requirement_changes > 0
+    )
+    if has_creep_signal and affected_entities and not (affected_entities & deadline_changed_entities):
+        deadlines_unchanged = True
+
+    creep_detected = bool(
+        (growth is not None and growth >= SCOPE_CREEP_GROWTH_PCT)
+        or semantic_expansions > 0
+        or (issues_added >= SCOPE_CREEP_ISSUES_ADDED and issues_added > issues_removed)
+    )
+
+    summary: str | None = None
+    if creep_detected or growth or drivers:
+        parts: list[str] = []
+        if growth is not None and growth > 0:
+            parts.append(f"Sprint scope has increased {growth:g}% since planning.")
+        elif creep_detected:
+            parts.append("Scope creep signals detected since planning.")
+        if drivers:
+            if len(drivers) == 1:
+                d = drivers[0]
+                parts.append(f"Main driver: {d.title} — {d.detail}.")
+            else:
+                titles = ", ".join(d.title for d in drivers[:3])
+                parts.append(f"Main drivers include {titles}.")
+        if deadlines_unchanged:
+            parts.append("Deadlines on affected work were not updated.")
+        summary = " ".join(parts) if parts else None
+
     return ScopeRiskIndicator(
         level=_scope_level(growth),
         baseline_points=round(baseline, 1),
         current_points=round(current, 1),
         scope_added_points=scope_added_points,
         scope_growth_percent=growth,
+        creep_detected=creep_detected,
+        summary=summary,
+        issues_added=issues_added,
+        issues_removed=issues_removed,
+        points_increased_events=points_increased_events,
+        requirement_changes=requirement_changes,
+        semantic_expansions=semantic_expansions,
+        new_dependencies=new_dependencies,
+        deadlines_unchanged=deadlines_unchanged,
+        drivers=drivers,
     )
 
 
@@ -549,6 +867,7 @@ def _compute_dependency_indicator(
 def _compute_risk_indicators(
     db: Session,
     project_id: uuid.UUID,
+    sprint: Sprint,
     stories: list[Story],
     tasks: list[Task],
     progress: DashboardProgress,
@@ -558,7 +877,9 @@ def _compute_risk_indicators(
 ) -> DashboardRiskIndicators:
     return DashboardRiskIndicators(
         delivery=_compute_delivery_indicator(progress, time_info, velocity),
-        scope=_compute_scope_indicator(progress, risks.scope_added_points),
+        scope=_compute_scope_indicator(
+            db, project_id, sprint, stories, tasks, progress, risks.scope_added_points
+        ),
         dependency=_compute_dependency_indicator(db, project_id, tasks, stories),
     )
 
@@ -717,7 +1038,7 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
     velocity = _compute_velocity(db, project_id, sprint, progress, time_info)
     risks = _compute_risks(db, project_id, sprint, stories, tasks, progress, time_info, velocity)
     risk_indicators = _compute_risk_indicators(
-        db, project_id, stories, tasks, progress, time_info, velocity, risks
+        db, project_id, sprint, stories, tasks, progress, time_info, velocity, risks
     )
     flow = _compute_flow(tasks, sprint)
     load = _compute_load(stories, tasks, members)

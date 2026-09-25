@@ -22,11 +22,13 @@ class JiraClient:
         access_token: str,
         cloud_id: str,
         story_points_field: str | None = None,
+        acceptance_criteria_field: str | None = None,
         timeout: float = 60.0,
     ):
         if not access_token or not cloud_id:
             raise JiraAPIError("Jira OAuth access token and cloud_id are required")
         self._story_points_field = (story_points_field or "").strip() or None
+        self._acceptance_criteria_field = (acceptance_criteria_field or "").strip() or None
         self._sprint_field: str | None = None
         self._flagged_field: str | None = None
         # print("access_token", access_token)
@@ -83,6 +85,7 @@ class JiraClient:
             access_token=access_token,
             cloud_id=connection.cloud_id,
             story_points_field=settings.jira_story_points_field or None,
+            acceptance_criteria_field=settings.jira_acceptance_criteria_field or None,
         )
 
     def close(self) -> None:
@@ -150,6 +153,18 @@ class JiraClient:
                 field_id = field.get("id")
                 if isinstance(field_id, str):
                     self._story_points_field = field_id
+                    return field_id
+        return None
+
+    def resolve_acceptance_criteria_field(self) -> str | None:
+        if self._acceptance_criteria_field:
+            return self._acceptance_criteria_field
+        for field in self.list_fields():
+            name = (field.get("name") or "").strip().lower()
+            if name in ("acceptance criteria", "acceptance criterion"):
+                field_id = field.get("id")
+                if isinstance(field_id, str):
+                    self._acceptance_criteria_field = field_id
                     return field_id
         return None
 

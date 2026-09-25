@@ -288,4 +288,6 @@ def map_changelog_item(
         return ProjectEventType.DeadlineChanged
     if field_l in ("sprint",):
         return ProjectEventType.ScopeChanged
+    if field_l in ("description", "acceptance criteria", "acceptance criterion"):
+        return ProjectEventType.RequirementAdded
     return None
