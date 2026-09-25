@@ -103,3 +103,9 @@ class ProjectDashboardResponse(BaseModel):
     load: DashboardLoad
     epic_health: list[DashboardEpicHealth] = Field(default_factory=list)
     message: str | None = None
+
+
+class SprintInsightsResponse(BaseModel):
+    insight: str
+    sprint_name: str | None = None
+    generated_at: datetime

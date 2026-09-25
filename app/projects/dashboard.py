@@ -123,7 +123,6 @@ def _completed_points_for_sprint(
 
 def _compute_progress(stories: list[Story], tasks: list[Task]) -> DashboardProgress:
     uses_points = _use_story_points(stories)
-    pprint(f"uses_points: {uses_points}")
     if uses_points:
         total_points = sum(_points(s.story_points) for s in stories if s.status != StoryStatus.cancelled)
         completed_points = sum(
@@ -492,7 +491,7 @@ def _compute_epic_health(db: Session, project_id: uuid.UUID, stories: list[Story
 
 def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashboardResponse:
     sprint, is_fallback = _select_focus_sprint(db, project_id)
-    pprint(f"sprint: {sprint}")
+    
     if sprint is None:
         return ProjectDashboardResponse(
             project_id=project_id,
@@ -508,9 +507,7 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
         )
 
     stories = _sprint_stories(db, project_id, sprint.id)
-    pprint(f"stories: {stories}")
     tasks = _sprint_tasks(db, project_id, sprint.id)
-    pprint(f"tasks: {tasks}")
     members = db.query(TeamMember).filter(TeamMember.project_id == project_id).all()
 
     progress = _compute_progress(stories, tasks)

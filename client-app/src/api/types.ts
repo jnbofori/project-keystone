@@ -254,6 +254,12 @@ export interface ProjectDashboard {
   message: string | null;
 }
 
+export interface SprintInsights {
+  insight: string;
+  sprint_name: string | null;
+  generated_at: string;
+}
+
 export const ROLE_RANK: Record<ProjectRole, number> = {
   viewer: 0,
   member: 1,

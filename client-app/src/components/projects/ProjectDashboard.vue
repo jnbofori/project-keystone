@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { dashboardApi } from '@/api';
-import type { ProjectDashboard } from '@/api/types';
+import type { ProjectDashboard, SprintInsights } from '@/api/types';
 import { useSnackbar } from '@/composables/useSnackbar';
 import { getErrorMessage } from '@/utils/apiError';
 import UiParentCard from '@/components/shared/UiParentCard.vue';
@@ -14,6 +14,10 @@ const { showError } = useSnackbar();
 const loading = ref(false);
 const dashboard = ref<ProjectDashboard | null>(null);
 
+const insightsLoading = ref(false);
+const insightsError = ref<string | null>(null);
+const insights = ref<SprintInsights | null>(null);
+
 const paceColor = computed(() => {
   const label = dashboard.value?.risks.pace_label;
   if (label === 'Ahead') return 'success';
@@ -25,11 +29,40 @@ const paceColor = computed(() => {
 const progressValue = computed(() => dashboard.value?.progress.percent ?? 0);
 const timeValue = computed(() => dashboard.value?.time.elapsed_percent ?? 0);
 
+const showInsightsCard = computed(() => Boolean(dashboard.value?.active_sprint));
+
+const insightParagraphs = computed(() => {
+  const text = insights.value?.insight?.trim();
+  if (!text) return [];
+  return text.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+});
+
+async function loadInsights() {
+  if (!props.projectId || !dashboard.value?.active_sprint) {
+    insights.value = null;
+    insightsError.value = null;
+    return;
+  }
+  insightsLoading.value = true;
+  insightsError.value = null;
+  try {
+    insights.value = await dashboardApi.getSprintInsights(props.projectId);
+  } catch (error) {
+    insights.value = null;
+    insightsError.value = getErrorMessage(error, 'Failed to generate sprint insights');
+  } finally {
+    insightsLoading.value = false;
+  }
+}
+
 async function load() {
   if (!props.projectId) return;
   loading.value = true;
+  insights.value = null;
+  insightsError.value = null;
   try {
     dashboard.value = await dashboardApi.getProjectDashboard(props.projectId);
+    void loadInsights();
   } catch (error) {
     showError(getErrorMessage(error, 'Failed to load delivery dashboard'));
     dashboard.value = null;
@@ -63,7 +96,6 @@ defineExpose({ reload: load });
     </v-alert>
 
     <template v-if="dashboard">
-      <!-- Sprint Intelligence -->
       <UiParentCard
         :title="dashboard.active_sprint ? `Sprint: ${dashboard.active_sprint.name}` : 'Delivery'"
       >
@@ -194,6 +226,32 @@ defineExpose({ reload: load });
             </div>
           </v-col>
         </v-row>
+      </UiParentCard>
+
+      <UiParentCard v-if="showInsightsCard" title="Sprint intelligence" class="mt-4">
+        <v-progress-linear v-if="insightsLoading" indeterminate color="primary" class="mb-4" />
+
+        <v-alert v-else-if="insightsError" type="warning" variant="tonal" class="mb-0">
+          <div class="d-flex flex-wrap align-center justify-space-between ga-3">
+            <span>{{ insightsError }}</span>
+            <v-btn size="small" variant="tonal" :loading="insightsLoading" @click="loadInsights">
+              Retry
+            </v-btn>
+          </div>
+        </v-alert>
+
+        <template v-else-if="insightParagraphs.length">
+          <p
+            v-for="(paragraph, index) in insightParagraphs"
+            :key="index"
+            class="text-body-1 mb-3"
+            :class="{ 'mb-0': index === insightParagraphs.length - 1 }"
+          >
+            {{ paragraph }}
+          </p>
+        </template>
+
+        <div v-else class="text-medium-emphasis">No insight available yet.</div>
       </UiParentCard>
 
       <v-row class="mt-2">

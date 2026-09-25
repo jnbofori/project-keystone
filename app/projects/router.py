@@ -12,7 +12,8 @@ from app.models.user import User
 from app.organizations.dependencies import get_user_org_membership
 from app.projects.dashboard import build_project_dashboard
 from app.projects.dependencies import require_project_member
-from app.schemas.dashboard import ProjectDashboardResponse
+from app.projects.sprint_insights import generate_sprint_insights
+from app.schemas.dashboard import ProjectDashboardResponse, SprintInsightsResponse
 from app.schemas.project import (
     ProjectCreate,
     ProjectMemberCreate,
@@ -92,6 +93,21 @@ def get_project_dashboard(
 ) -> ProjectDashboardResponse:
     project, _ = project_membership
     return build_project_dashboard(db, project.id)
+
+
+@router.post("/{project_id}/dashboard/insights", response_model=SprintInsightsResponse)
+def get_sprint_insights(
+    project_membership: Annotated[tuple[Project, ProjectMember], Depends(require_project_member())],
+    db: Annotated[Session, Depends(get_db)],
+) -> SprintInsightsResponse:
+    project, _ = project_membership
+    try:
+        return generate_sprint_insights(db, project.id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to generate sprint insights: {exc}",
+        ) from exc
 
 
 @router.get("/{project_id}/members", response_model=list[ProjectMemberResponse])
