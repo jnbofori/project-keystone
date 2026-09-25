@@ -79,12 +79,12 @@ Then:
 2. After consent, tokens are stored once for the organization
 3. If multiple Atlassian sites: `PUT /organizations/me/jira/cloud` with `{"cloud_id": "..."}`
 4. Project **admin+**: `GET /integrations/jira/projects?project_id={id}` — list Jira projects
-5. Project **admin+**: `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}` (registers webhooks for that key)
+5. Project **admin+**: `PUT /projects/{id}/jira` — body `{"jira_project_key": "PROJ"}` (refreshes the org’s single dynamic webhook JQL)
 6. Project **admin+**: `POST /projects/{id}/jira/sync` — upsert team members, sprints, epics, stories, tasks, events
 
-Additional Keystone projects in the same org reuse the org Jira connection — only link a different Jira project key.
+Additional Keystone projects in the same org reuse the org Jira connection — only link a different Jira project key. Atlassian allows one webhook URL per OAuth user, so Keystone registers a single org callback and filters with `project in (...)`.
 
-Dynamic webhooks expire after ~30 days; re-link the Jira project key to re-register. Unlink or org disconnect removes remote webhooks.
+Dynamic webhooks expire after ~30 days; re-link any Jira project key (or change cloud site) to refresh registration. Unlink the last key or org disconnect removes the remote webhook.
 
 ## Project roles
 

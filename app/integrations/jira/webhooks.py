@@ -32,7 +32,7 @@ ISSUE_WEBHOOK_EVENTS = [
 ]
 
 
-def _webhook_callback_url(project_id: UUID, secret: str, settings: Settings) -> str:
+def _webhook_callback_url(organization_id: UUID, secret: str, settings: Settings) -> str:
     base = (settings.jira_webhook_base_url or "").rstrip("/")
     if not base:
         raise JiraAPIError(
@@ -40,14 +40,14 @@ def _webhook_callback_url(project_id: UUID, secret: str, settings: Settings) -> 
             status_code=503,
         )
     query = urlencode({"token": secret})
-    return f"{base}/integrations/jira/webhooks/{project_id}?{query}"
+    return f"{base}/integrations/jira/webhooks/org/{organization_id}?{query}"
 
 
-def _ensure_webhook_secret(project: Project) -> str:
-    if project.webhook_secret:
-        return project.webhook_secret
-    project.webhook_secret = secrets.token_urlsafe(32)
-    return project.webhook_secret
+def _ensure_webhook_secret(connection: JiraConnection) -> str:
+    if connection.webhook_secret:
+        return connection.webhook_secret
+    connection.webhook_secret = secrets.token_urlsafe(32)
+    return connection.webhook_secret
 
 
 def _parse_expiration(payload: dict[str, Any]) -> datetime:
@@ -86,44 +86,102 @@ def _extract_created_webhook_id(payload: dict[str, Any]) -> str | None:
     return None
 
 
-def unregister_project_webhook(
+def _linked_jira_keys(db: Session, organization_id: UUID) -> list[str]:
+    rows = (
+        db.query(Project.jira_project_key)
+        .filter(
+            Project.organization_id == organization_id,
+            Project.jira_project_key.isnot(None),
+        )
+        .all()
+    )
+    keys = sorted({str(key).strip() for (key,) in rows if key and str(key).strip()})
+    return keys
+
+
+def _jql_for_keys(keys: list[str]) -> str:
+    ordered = sorted({key.strip() for key in keys if key and key.strip()})
+    if not ordered:
+        raise JiraAPIError("No Jira project keys to register webhook for", status_code=400)
+    if len(ordered) == 1:
+        return f'project = "{ordered[0]}"'
+    quoted = ", ".join(f'"{key}"' for key in ordered)
+    return f"project in ({quoted})"
+
+
+def _clear_local_webhook(connection: JiraConnection) -> None:
+    connection.webhook_id = None
+    connection.webhook_expiration = None
+    # Keep secret so the org URL stays stable across re-registers
+
+
+def unregister_org_webhook(
     db: Session,
-    project: Project,
     connection: JiraConnection,
     settings: Settings | None = None,
+    *,
+    clear_secret: bool = False,
 ) -> None:
+    """Delete the org's dynamic webhook from Jira and clear local registration fields."""
     settings = settings or get_settings()
-    webhook_id = project.webhook_id
-    if not webhook_id:
-        project.webhook_id = None
-        project.webhook_expiration = None
-        db.add(project)
-        return
+    webhook_id = connection.webhook_id
 
-    if not connection.cloud_id:
-        project.webhook_id = None
-        project.webhook_expiration = None
-        db.add(project)
-        return
+    ids_to_delete: list[str] = []
+    if webhook_id:
+        ids_to_delete.append(webhook_id)
 
-    try:
-        with JiraClient.from_connection(db, connection, settings) as client:
-            client.delete_webhooks([webhook_id])
-    except JiraAPIError as exc:
-        logger.warning("Failed to delete Jira webhook %s: %s", webhook_id, exc)
+    org_path = f"/integrations/jira/webhooks/org/{connection.organization_id}"
+    project_ids = {
+        str(pid)
+        for (pid,) in db.query(Project.id)
+        .filter(Project.organization_id == connection.organization_id)
+        .all()
+    }
 
-    project.webhook_id = None
-    project.webhook_expiration = None
-    db.add(project)
+    if connection.cloud_id:
+        try:
+            with JiraClient.from_connection(db, connection, settings) as client:
+                for item in client.list_webhooks():
+                    url = str(item.get("url") or "")
+                    wid = item.get("id")
+                    if wid is None:
+                        continue
+                    if org_path in url:
+                        ids_to_delete.append(str(wid))
+                        continue
+                    # Clean up legacy per-project callback URLs for this org
+                    for project_id in project_ids:
+                        if f"/integrations/jira/webhooks/{project_id}" in url:
+                            ids_to_delete.append(str(wid))
+                            break
+                if ids_to_delete:
+                    seen: set[str] = set()
+                    unique_ids = []
+                    for wid in ids_to_delete:
+                        if wid not in seen:
+                            seen.add(wid)
+                            unique_ids.append(wid)
+                    client.delete_webhooks(unique_ids)
+        except JiraAPIError as exc:
+            logger.warning("Failed to delete Jira webhook(s) %s: %s", ids_to_delete, exc)
+
+    _clear_local_webhook(connection)
+    if clear_secret:
+        connection.webhook_secret = None
+    db.add(connection)
 
 
-def register_project_webhook(
+def refresh_org_webhook(
     db: Session,
-    project: Project,
     connection: JiraConnection,
-    jira_project_key: str,
     settings: Settings | None = None,
 ) -> None:
+    """
+    Ensure a single org-level dynamic webhook exists for all linked Jira project keys.
+
+    Atlassian allows only one callback URL per OAuth user, so we always use
+    /integrations/jira/webhooks/org/{organization_id} and update JQL on link/unlink.
+    """
     settings = settings or get_settings()
     if not connection.cloud_id:
         raise JiraAPIError("Jira site not selected", status_code=400)
@@ -133,13 +191,19 @@ def register_project_webhook(
             status_code=503,
         )
 
-    if project.webhook_id:
-        unregister_project_webhook(db, project, connection, settings)
+    keys = _linked_jira_keys(db, connection.organization_id)
+    if not keys:
+        unregister_org_webhook(db, connection, settings)
         db.flush()
+        return
 
-    secret = _ensure_webhook_secret(project)
-    url = _webhook_callback_url(project.id, secret, settings)
-    jql = f'project = "{jira_project_key}"'
+    # Replace any existing registration (including stale per-project URLs)
+    unregister_org_webhook(db, connection, settings)
+    db.flush()
+
+    secret = _ensure_webhook_secret(connection)
+    url = _webhook_callback_url(connection.organization_id, secret, settings)
+    jql = _jql_for_keys(keys)
 
     with JiraClient.from_connection(db, connection, settings) as client:
         payload = client.register_webhooks(
@@ -152,30 +216,34 @@ def register_project_webhook(
     if not webhook_id:
         raise JiraAPIError("Jira webhook registration returned no webhook id", status_code=502, body=payload)
 
-    project.webhook_id = webhook_id
-    project.webhook_expiration = _parse_expiration(payload or {})
-    project.webhook_secret = secret
-    db.add(project)
+    connection.webhook_id = webhook_id
+    connection.webhook_expiration = _parse_expiration(payload or {})
+    connection.webhook_secret = secret
+    db.add(connection)
     db.flush()
 
 
-def unregister_org_webhooks(
+def resolve_project_for_issue(
     db: Session,
     organization_id: UUID,
-    connection: JiraConnection,
-    settings: Settings | None = None,
-) -> None:
-    settings = settings or get_settings()
+    issue_key: str,
+) -> Project | None:
+    prefix, _, _rest = issue_key.partition("-")
+    if not prefix:
+        return None
+    prefix_upper = prefix.upper()
     projects = (
         db.query(Project)
-        .filter(Project.organization_id == organization_id, Project.webhook_id.isnot(None))
+        .filter(
+            Project.organization_id == organization_id,
+            Project.jira_project_key.isnot(None),
+        )
         .all()
     )
     for project in projects:
-        try:
-            unregister_project_webhook(db, project, connection, settings)
-        except JiraAPIError as exc:
-            logger.warning("Failed unregistering webhook for project %s: %s", project.id, exc)
+        if project.jira_project_key and project.jira_project_key.upper() == prefix_upper:
+            return project
+    return None
 
 
 def _load_lookup_maps(

@@ -63,9 +63,6 @@ class Project(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     jira_project_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     jira_project_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    webhook_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    webhook_expiration: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    webhook_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

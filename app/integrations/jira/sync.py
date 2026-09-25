@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from pprint import pprint
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -81,6 +82,8 @@ def sync_jira_project(
         members_by_account = _sync_team_members(client, db, project, result)
         sprints_by_jira_id = _sync_sprints(client, db, project, result)
         story_points_field = client.resolve_story_points_field()
+        sprint_field = client.resolve_sprint_field()
+        flagged_field = client.resolve_flagged_field()
         epics_by_key, stories_by_key, tasks_by_key = _sync_issues(
             client,
             db,
@@ -89,6 +92,8 @@ def sync_jira_project(
             members_by_account=members_by_account,
             sprints_by_jira_id=sprints_by_jira_id,
             story_points_field=story_points_field,
+            sprint_field=sprint_field,
+            flagged_field=flagged_field,
         )
         _sync_events(
             client,
@@ -211,7 +216,6 @@ def _sync_sprints(
     try:
         boards = client.list_boards(project.jira_project_key)
     except JiraAPIError as exc:
-        print("boards error", exc)
         result.errors.append(SyncError("sprints", project.jira_project_key, str(exc)))
         return by_id
 
@@ -222,7 +226,6 @@ def _sync_sprints(
         try:
             sprints = client.list_board_sprints(board_id)
         except JiraAPIError as exc:
-            print("sprints error", exc)
             result.errors.append(SyncError("sprints", str(board_id), str(exc)))
             continue
 
@@ -274,6 +277,8 @@ def _sync_issues(
     members_by_account: dict[str, TeamMember],
     sprints_by_jira_id: dict[str, Sprint],
     story_points_field: str | None,
+    sprint_field: str,
+    flagged_field: str | None = None,
 ) -> tuple[dict[str, Epic], dict[str, Story], dict[str, Task]]:
     fields = [
         "summary",
@@ -288,9 +293,14 @@ def _sync_issues(
         "duedate",
         "resolutiondate",
         "labels",
+        "sprint",
     ]
     if story_points_field:
         fields.append(story_points_field)
+    if sprint_field and sprint_field not in fields:
+        fields.append(sprint_field)
+    if flagged_field and flagged_field not in fields:
+        fields.append(flagged_field)
 
     jql = f'project = "{project.jira_project_key}" ORDER BY created ASC'
     try:
@@ -345,6 +355,7 @@ def _sync_issues(
         if classify_issue(issue) != "story":
             continue
         try:
+            pprint(f"issue: {issue}")
             _upsert_story(
                 db,
                 project,
@@ -354,6 +365,7 @@ def _sync_issues(
                 members_by_account=members_by_account,
                 sprints_by_jira_id=sprints_by_jira_id,
                 story_points_field=story_points_field,
+                flagged_field=flagged_field,
             )
             result.stories += 1
         except Exception as exc:  # noqa: BLE001
@@ -377,6 +389,7 @@ def _sync_issues(
                 members_by_account=members_by_account,
                 sprints_by_jira_id=sprints_by_jira_id,
                 story_points_field=story_points_field,
+                flagged_field=flagged_field,
             )
             result.tasks += 1
         except Exception as exc:  # noqa: BLE001

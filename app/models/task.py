@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -68,6 +69,7 @@ class Task(Base):
         nullable=False,
     )
     story_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id"), nullable=True
     )

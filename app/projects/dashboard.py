@@ -4,6 +4,7 @@ import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
+from pprint import pprint
 
 from sqlalchemy.orm import Session
 
@@ -122,6 +123,7 @@ def _completed_points_for_sprint(
 
 def _compute_progress(stories: list[Story], tasks: list[Task]) -> DashboardProgress:
     uses_points = _use_story_points(stories)
+    pprint(f"uses_points: {uses_points}")
     if uses_points:
         total_points = sum(_points(s.story_points) for s in stories if s.status != StoryStatus.cancelled)
         completed_points = sum(
@@ -281,10 +283,19 @@ def _compute_risks(
     starts = _aware(sprint.starts_at)
     ends = _aware(sprint.ends_at) or now
 
-    # todo: tasks may not have a "blocked" status, use Jira's Flagged/Impediment capability
-    blocked = [t for t in tasks if t.status == TaskStatus.blocked]
+    # Blocked = TaskStatus.blocked, or Jira Flagged/Impediment on tasks or open stories
+    blocked_items: list[Task | Story] = [
+        t for t in tasks if t.status == TaskStatus.blocked or t.is_flagged
+    ]
+    blocked_items.extend(
+        s
+        for s in stories
+        if s.is_flagged and s.status not in (StoryStatus.done, StoryStatus.cancelled)
+    )
     stale_cutoff = now - timedelta(days=STALE_BLOCKED_DAYS)
-    stale_blocked = sum(1 for t in blocked if _aware(t.updated_at) and _aware(t.updated_at) <= stale_cutoff)
+    stale_blocked = sum(
+        1 for item in blocked_items if _aware(item.updated_at) and _aware(item.updated_at) <= stale_cutoff
+    )
 
     window_start = starts or (_aware(sprint.created_at) or now)
     # rate at which closed tasks are being reopened
@@ -341,7 +352,7 @@ def _compute_risks(
         carryover = True
 
     return DashboardRisks(
-        blocked_count=len(blocked),
+        blocked_count=len(blocked_items),
         stale_blocked_count=stale_blocked,
         scope_added_points=_scope_added_points(db, project_id, sprint, stories, tasks),
         reopened_count=reopened,
@@ -481,6 +492,7 @@ def _compute_epic_health(db: Session, project_id: uuid.UUID, stories: list[Story
 
 def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashboardResponse:
     sprint, is_fallback = _select_focus_sprint(db, project_id)
+    pprint(f"sprint: {sprint}")
     if sprint is None:
         return ProjectDashboardResponse(
             project_id=project_id,
@@ -496,7 +508,9 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
         )
 
     stories = _sprint_stories(db, project_id, sprint.id)
+    pprint(f"stories: {stories}")
     tasks = _sprint_tasks(db, project_id, sprint.id)
+    pprint(f"tasks: {tasks}")
     members = db.query(TeamMember).filter(TeamMember.project_id == project_id).all()
 
     progress = _compute_progress(stories, tasks)

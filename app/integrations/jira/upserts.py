@@ -10,6 +10,7 @@ from app.integrations.jira.mappers import (
     extract_epic_key,
     extract_parent_key,
     extract_sprint_ids,
+    is_flagged_impediment,
     map_epic_or_story_status,
     map_story_status,
     map_task_priority,
@@ -127,6 +128,7 @@ def upsert_story(
     members_by_account: dict[str, TeamMember],
     sprints_by_jira_id: dict[str, Sprint],
     story_points_field: str | None,
+    flagged_field: str | None = None,
 ) -> Story:
     key = issue["key"]
     fields = issue.get("fields") or {}
@@ -139,6 +141,7 @@ def upsert_story(
     assignee_id = ensure_assignee(db, project, fields, members_by_account)
     epic_id = resolve_epic_id(fields, epics_by_key)
     sprint_id = resolve_sprint_id(fields, sprints_by_jira_id)
+    flagged = is_flagged_impediment(fields, flagged_field)
 
     if story is None:
         story = Story(
@@ -150,6 +153,7 @@ def upsert_story(
             status=status,
             priority=priority,
             story_points=points,
+            is_flagged=flagged,
             epic_id=epic_id,
             sprint_id=sprint_id,
             assignee_id=assignee_id,
@@ -162,6 +166,7 @@ def upsert_story(
         story.status = status
         story.priority = priority
         story.story_points = points
+        story.is_flagged = flagged
         story.epic_id = epic_id
         story.sprint_id = sprint_id
         story.assignee_id = assignee_id
@@ -179,6 +184,7 @@ def upsert_task(
     members_by_account: dict[str, TeamMember],
     sprints_by_jira_id: dict[str, Sprint],
     story_points_field: str | None,
+    flagged_field: str | None = None,
 ) -> Task:
     key = issue["key"]
     fields = issue.get("fields") or {}
@@ -191,6 +197,7 @@ def upsert_task(
     assignee_id = ensure_assignee(db, project, fields, members_by_account)
     epic_id = resolve_epic_id(fields, epics_by_key)
     sprint_id = resolve_sprint_id(fields, sprints_by_jira_id)
+    flagged = is_flagged_impediment(fields, flagged_field)
 
     story_id = None
     parent_key = extract_parent_key(fields)
@@ -216,6 +223,7 @@ def upsert_task(
             status=status,
             priority=priority,
             story_points=points,
+            is_flagged=flagged,
             assignee_id=assignee_id,
             sprint_id=sprint_id,
             epic_id=epic_id,
@@ -234,6 +242,7 @@ def upsert_task(
         task.status = status
         task.priority = priority
         task.story_points = points
+        task.is_flagged = flagged
         task.assignee_id = assignee_id
         task.sprint_id = sprint_id
         task.epic_id = epic_id

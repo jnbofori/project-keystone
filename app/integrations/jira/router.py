@@ -28,9 +28,9 @@ from app.integrations.jira.oauth import (
 from app.integrations.jira.sync import sync_jira_project
 from app.integrations.jira.webhooks import (
     handle_issue_webhook,
-    register_project_webhook,
-    unregister_org_webhooks,
-    unregister_project_webhook,
+    refresh_org_webhook,
+    resolve_project_for_issue,
+    unregister_org_webhook,
 )
 from app.models.jira_connection import JiraConnection
 from app.models.organization import Organization, OrganizationMember, OrganizationRole
@@ -291,7 +291,7 @@ def disconnect_jira(
     connection = _get_connection(db, organization.id)
     if connection:
         try:
-            unregister_org_webhooks(db, organization.id, connection)
+            unregister_org_webhook(db, connection, clear_secret=True)
         except JiraAPIError:
             pass
         db.delete(connection)
@@ -331,24 +331,22 @@ def select_jira_cloud(
     db.add(connection)
     db.flush()
 
-    linked = (
+    linked_count = (
         db.query(Project)
         .filter(
             Project.organization_id == organization.id,
             Project.jira_project_key.isnot(None),
         )
-        .all()
+        .count()
     )
-    for project in linked:
-        if not project.jira_project_key:
-            continue
+    if linked_count:
         try:
-            register_project_webhook(db, project, connection, project.jira_project_key, settings)
+            refresh_org_webhook(db, connection, settings)
         except JiraAPIError as exc:
             db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to register Jira webhook for {project.jira_project_key}: {exc}",
+                detail=f"Failed to register Jira webhook: {exc}",
             ) from exc
 
     db.commit()
@@ -405,14 +403,19 @@ def link_jira_project(
 
     if key is None:
         connection = _get_connection(db, project.organization_id)
-        if connection:
-            try:
-                unregister_project_webhook(db, project, connection)
-            except JiraAPIError:
-                pass
         project.jira_project_key = None
         project.jira_project_id = None
         db.add(project)
+        db.flush()
+        if connection:
+            try:
+                refresh_org_webhook(db, connection)
+            except JiraAPIError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to update Jira webhook: {exc}",
+                ) from exc
         db.commit()
         db.refresh(project)
         return JiraLinkResponse(
@@ -464,7 +467,7 @@ def link_jira_project(
     db.flush()
 
     try:
-        register_project_webhook(db, project, connection, project.jira_project_key)
+        refresh_org_webhook(db, connection)
     except JiraAPIError as exc:
         db.rollback()
         status_code = status.HTTP_503_SERVICE_UNAVAILABLE if exc.status_code == 503 else status.HTTP_502_BAD_GATEWAY
@@ -482,28 +485,34 @@ def link_jira_project(
     )
 
 
-@router.post("/integrations/jira/webhooks/{project_id}")
-def receive_jira_webhook(
-    project_id: UUID,
+@router.post("/integrations/jira/webhooks/org/{organization_id}")
+def receive_org_jira_webhook(
+    organization_id: UUID,
     payload: dict[str, Any],
     db: Annotated[Session, Depends(get_db)],
     token: Annotated[str | None, Query()] = None,
 ) -> dict[str, str]:
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    if not project.webhook_secret:
+    connection = _get_connection(db, organization_id)
+    if connection is None or not connection.webhook_secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Webhook not registered")
-    if not token or token != project.webhook_secret:
+    if not token or token != connection.webhook_secret:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
 
-    print("payload", payload)
+    issue = payload.get("issue") or {}
+    issue_key = issue.get("key")
+    if not isinstance(issue_key, str) or not issue_key:
+        return {"status": "ignored"}
+
+    project = resolve_project_for_issue(db, organization_id, issue_key)
+    if project is None:
+        logger.info("No Keystone project for Jira issue %s in org %s", issue_key, organization_id)
+        return {"status": "ignored"}
+
     try:
         handle_issue_webhook(db, project, payload)
     except Exception:
         db.rollback()
-        logger.exception("Failed handling Jira webhook for project %s", project_id)
+        logger.exception("Failed handling Jira webhook for org %s issue %s", organization_id, issue_key)
         return {"status": "error"}
 
     return {"status": "ok"}
@@ -576,7 +585,6 @@ def list_jira_webhooks(
     try:
         with _client_for_org(db, project.organization_id) as client:
             webhooks = client.list_webhooks()
-            print("webhooks", webhooks)
             db.commit()
     except JiraAPIError as exc:
         db.rollback()

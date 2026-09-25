@@ -148,6 +148,32 @@ def classify_issue(issue: dict[str, Any]) -> str:
     return "task"
 
 
+def _value_has_impediment(value: Any) -> bool:
+    if value is None:
+        return False
+    candidates = value if isinstance(value, list) else [value]
+    for item in candidates:
+        if isinstance(item, dict):
+            label = (item.get("value") or item.get("name") or "").strip().lower()
+            if label == "impediment":
+                return True
+        elif isinstance(item, str) and item.strip().lower() == "impediment":
+            return True
+    return False
+
+
+def is_flagged_impediment(fields: dict[str, Any], flagged_field: str | None = None) -> bool:
+    """True when Jira Flagged field contains Impediment."""
+    if flagged_field:
+        return _value_has_impediment(fields.get(flagged_field))
+    for key, value in fields.items():
+        if not key.startswith("customfield_"):
+            continue
+        if _value_has_impediment(value):
+            return True
+    return False
+
+
 def extract_sprint_ids(fields: dict[str, Any]) -> list[str]:
     """Collect sprint ids from common sprint field shapes."""
     ids: list[str] = []

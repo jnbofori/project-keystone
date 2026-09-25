@@ -27,8 +27,10 @@ class JiraClient:
         if not access_token or not cloud_id:
             raise JiraAPIError("Jira OAuth access token and cloud_id are required")
         self._story_points_field = (story_points_field or "").strip() or None
-        print("access_token", access_token)
-        print("cloud_id", cloud_id)
+        self._sprint_field: str | None = None
+        self._flagged_field: str | None = None
+        # print("access_token", access_token)
+        # print("cloud_id", cloud_id)
         self._client = httpx.Client(
             base_url=f"https://api.atlassian.com/ex/jira/{cloud_id}",
             headers={
@@ -122,7 +124,6 @@ class JiraClient:
         return self._request("GET", f"/rest/api/3/project/{project_key_or_id}")
 
     def list_project_role_urls(self, project_key: str) -> dict[str, str]:
-        print("list_project_role_urls", project_key)
         data = self._request("GET", f"/rest/api/3/project/{project_key}/role")
         return dict(data or {})
 
@@ -150,6 +151,35 @@ class JiraClient:
                 if isinstance(field_id, str):
                     self._story_points_field = field_id
                     return field_id
+        return None
+
+    def resolve_sprint_field(self) -> str:
+        """Return the Sprint field id for issue search (customfield_XXX or 'sprint')."""
+        if self._sprint_field:
+            return self._sprint_field
+        for field in self.list_fields():
+            name = (field.get("name") or "").strip().lower()
+            if name == "sprint":
+                field_id = field.get("id")
+                if isinstance(field_id, str):
+                    self._sprint_field = field_id
+                    return field_id
+        # Jira Search accepts the sprint field name as an alias
+        self._sprint_field = "sprint"
+        return "sprint"
+
+    def resolve_flagged_field(self) -> str | None:
+        """Return the Flagged (Impediment) custom field id, if present."""
+        if self._flagged_field is not None:
+            return self._flagged_field or None
+        for field in self.list_fields():
+            name = (field.get("name") or "").strip().lower()
+            if name == "flagged":
+                field_id = field.get("id")
+                if isinstance(field_id, str):
+                    self._flagged_field = field_id
+                    return field_id
+        self._flagged_field = ""
         return None
 
     def search_issues(
@@ -230,7 +260,6 @@ class JiraClient:
         return histories
 
     def list_boards(self, project_key_or_id: str) -> list[dict[str, Any]]:
-        print("list_boards", project_key_or_id)
         boards: list[dict[str, Any]] = []
         start_at = 0
         max_results = 50
@@ -302,8 +331,6 @@ class JiraClient:
 
     def list_webhooks(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/rest/api/3/webhook", params={"maxResults": 100})
-        print("list_webhooks", data)
         if isinstance(data, list):
             return data
         return list(data.get("values") or [])
-    

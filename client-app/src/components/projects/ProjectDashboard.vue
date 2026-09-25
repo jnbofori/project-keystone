@@ -63,6 +63,7 @@ defineExpose({ reload: load });
     </v-alert>
 
     <template v-if="dashboard">
+      <!-- Sprint Intelligence -->
       <UiParentCard
         :title="dashboard.active_sprint ? `Sprint: ${dashboard.active_sprint.name}` : 'Delivery'"
       >
@@ -237,9 +238,12 @@ defineExpose({ reload: load });
         </v-col>
       </v-row>
 
-      <v-row v-if="dashboard.flow.due_soon.length || dashboard.epic_health.length" class="mt-2">
-        <v-col v-if="dashboard.flow.due_soon.length" cols="12" md="6">
+      <v-row class="mt-2">
+        <v-col cols="12" md="6">
           <UiParentCard title="Due-date risk">
+            <div v-if="!dashboard.flow.due_soon.length" class="text-medium-emphasis">
+              No upcoming or overdue due dates.
+            </div>
             <div v-for="item in dashboard.flow.due_soon" :key="item.id" class="mb-3">
               <div class="font-weight-medium text-truncate">{{ item.title }}</div>
               <div class="text-caption text-medium-emphasis">

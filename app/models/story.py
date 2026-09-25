@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +53,7 @@ class Story(Base):
         nullable=False,
     )
     story_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     epic_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("epics.id"), nullable=True)
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sprints.id"), nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
