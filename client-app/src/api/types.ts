@@ -155,6 +155,105 @@ export interface JiraSyncResponse {
   errors: JiraSyncErrorItem[];
 }
 
+export interface DashboardSprint {
+  id: string;
+  name: string;
+  status: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_fallback: boolean;
+}
+
+export interface DashboardProgress {
+  percent: number | null;
+  completed_points: number;
+  total_points: number;
+  completed_count: number;
+  total_count: number;
+  uses_points: boolean;
+}
+
+export interface DashboardTime {
+  elapsed_percent: number | null;
+  days_remaining: number | null;
+}
+
+export interface DashboardVelocity {
+  last_sprint_points: number | null;
+  avg_3_sprint: number | null;
+  forecast_current: number | null;
+}
+
+export interface DashboardRisks {
+  blocked_count: number;
+  stale_blocked_count: number;
+  scope_added_points: number;
+  reopened_count: number;
+  reopen_rate: number | null;
+  pace_gap: number | null;
+  carryover_likely: boolean;
+  pace_label: string | null;
+}
+
+export interface DashboardStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface DashboardAgingItem {
+  id: string;
+  title: string;
+  days: number;
+  status: string;
+  entity_type: string;
+}
+
+export interface DashboardDueItem {
+  id: string;
+  title: string;
+  due_date: string;
+  status: string;
+}
+
+export interface DashboardFlow {
+  by_status: DashboardStatusCount[];
+  aging_wip: DashboardAgingItem[];
+  due_soon: DashboardDueItem[];
+}
+
+export interface DashboardAssigneeLoad {
+  assignee_id: string | null;
+  name: string;
+  open_points: number;
+  open_tasks: number;
+  capacity_points: number | null;
+}
+
+export interface DashboardLoad {
+  by_assignee: DashboardAssigneeLoad[];
+}
+
+export interface DashboardEpicHealth {
+  id: string;
+  title: string;
+  done_stories: number;
+  total_stories: number;
+  percent_done: number | null;
+}
+
+export interface ProjectDashboard {
+  project_id: string;
+  active_sprint: DashboardSprint | null;
+  progress: DashboardProgress;
+  time: DashboardTime;
+  velocity: DashboardVelocity;
+  risks: DashboardRisks;
+  flow: DashboardFlow;
+  load: DashboardLoad;
+  epic_health: DashboardEpicHealth[];
+  message: string | null;
+}
+
 export const ROLE_RANK: Record<ProjectRole, number> = {
   viewer: 0,
   member: 1,

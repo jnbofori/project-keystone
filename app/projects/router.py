@@ -10,7 +10,9 @@ from app.models.organization import OrganizationMember
 from app.models.project import Project, ProjectMember, ProjectRole
 from app.models.user import User
 from app.organizations.dependencies import get_user_org_membership
+from app.projects.dashboard import build_project_dashboard
 from app.projects.dependencies import require_project_member
+from app.schemas.dashboard import ProjectDashboardResponse
 from app.schemas.project import (
     ProjectCreate,
     ProjectMemberCreate,
@@ -81,6 +83,15 @@ def get_project(
 ) -> ProjectResponse:
     project, membership = project_membership
     return _to_project_response(project, membership)
+
+
+@router.get("/{project_id}/dashboard", response_model=ProjectDashboardResponse)
+def get_project_dashboard(
+    project_membership: Annotated[tuple[Project, ProjectMember], Depends(require_project_member())],
+    db: Annotated[Session, Depends(get_db)],
+) -> ProjectDashboardResponse:
+    project, _ = project_membership
+    return build_project_dashboard(db, project.id)
 
 
 @router.get("/{project_id}/members", response_model=list[ProjectMemberResponse])

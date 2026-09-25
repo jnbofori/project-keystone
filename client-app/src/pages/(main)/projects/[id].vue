@@ -9,6 +9,7 @@ import QueryPanel from '@/components/projects/QueryPanel.vue';
 import QueryHistory from '@/components/projects/QueryHistory.vue';
 import MemberFormDialog from '@/components/projects/MemberFormDialog.vue';
 import JiraIntegrationPanel from '@/components/projects/JiraIntegrationPanel.vue';
+import ProjectDashboard from '@/components/projects/ProjectDashboard.vue';
 import { useProjectsStore } from '@/stores/projects';
 import { useProjectRole } from '@/composables/useProjectRole';
 import { useDocumentPolling } from '@/composables/useDocumentPolling';
@@ -224,36 +225,7 @@ watch(
 
     <v-window v-model="activeTab" class="mt-4">
       <v-window-item value="overview">
-        <v-row>
-          <v-col cols="12" sm="4">
-            <v-card variant="outlined">
-              <v-card-text>
-                <div class="text-body-small text-medium-emphasis">Documents</div>
-                <div class="text-h4">{{ documents.length }}</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-          <v-col cols="12" sm="4">
-            <v-card variant="outlined">
-              <v-card-text>
-                <div class="text-body-small text-medium-emphasis">Ready</div>
-                <div class="text-h4">{{ readyDocumentCount }}</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-          <v-col cols="12" sm="4">
-            <v-card variant="outlined">
-              <v-card-text>
-                <div class="text-body-small text-medium-emphasis">Questions</div>
-                <div class="text-h4">{{ queries.length }}</div>
-              </v-card-text>
-            </v-card>
-          </v-col>
-        </v-row>
-        <v-alert type="info" variant="tonal" class="mt-4">
-          Use <strong>Jira</strong> and <strong>Members</strong> for delivery. Documents and Ask are
-          knowledge features for this project.
-        </v-alert>
+        <ProjectDashboard :project-id="projectId" />
       </v-window-item>
 
       <v-window-item v-if="permissions.canManageJira" value="jira">
