@@ -31,6 +31,18 @@ const timeValue = computed(() => dashboard.value?.time.elapsed_percent ?? 0);
 
 const showInsightsCard = computed(() => Boolean(dashboard.value?.active_sprint));
 
+function riskLevelColor(level: string | null | undefined): string {
+  if (level === 'high') return 'error';
+  if (level === 'medium') return 'warning';
+  if (level === 'low') return 'success';
+  return 'default';
+}
+
+function formatRiskLevel(level: string | null | undefined): string {
+  if (!level) return 'Unavailable';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
 const insightParagraphs = computed(() => {
   const text = insights.value?.insight?.trim();
   if (!text) return [];
@@ -224,6 +236,103 @@ defineExpose({ reload: load });
                   : '—'
               }}
             </div>
+          </v-col>
+        </v-row>
+      </UiParentCard>
+
+      <UiParentCard
+        v-if="dashboard.risk_indicators"
+        title="Risk indicators"
+        class="mt-4"
+      >
+        <v-row>
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="h-100">
+              <v-card-text>
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <div class="text-body-2 text-medium-emphasis">Delivery</div>
+                  <v-chip
+                    size="small"
+                    variant="tonal"
+                    :color="riskLevelColor(dashboard.risk_indicators.delivery.level)"
+                  >
+                    {{ formatRiskLevel(dashboard.risk_indicators.delivery.level) }}
+                  </v-chip>
+                </div>
+                <div class="text-h5 mb-1">
+                  {{
+                    dashboard.risk_indicators.delivery.velocity_ratio !== null
+                      ? `${dashboard.risk_indicators.delivery.velocity_ratio}x`
+                      : '—'
+                  }}
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  Required {{ formatPoints(dashboard.risk_indicators.delivery.required_velocity) }}
+                  vs hist. {{ formatPoints(dashboard.risk_indicators.delivery.historical_velocity) }}
+                  · {{ formatPoints(dashboard.risk_indicators.delivery.remaining_points) }} pts left
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="h-100">
+              <v-card-text>
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <div class="text-body-2 text-medium-emphasis">Scope</div>
+                  <v-chip
+                    size="small"
+                    variant="tonal"
+                    :color="riskLevelColor(dashboard.risk_indicators.scope.level)"
+                  >
+                    {{ formatRiskLevel(dashboard.risk_indicators.scope.level) }}
+                  </v-chip>
+                </div>
+                <div class="text-h5 mb-1">
+                  {{
+                    dashboard.risk_indicators.scope.scope_growth_percent !== null
+                      ? `+${dashboard.risk_indicators.scope.scope_growth_percent}%`
+                      : '—'
+                  }}
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  {{ formatPoints(dashboard.risk_indicators.scope.baseline_points) }}
+                  → {{ formatPoints(dashboard.risk_indicators.scope.current_points) }} pts
+                  (+{{ formatPoints(dashboard.risk_indicators.scope.scope_added_points) }} mid-sprint)
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-card variant="outlined" class="h-100">
+              <v-card-text>
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <div class="text-body-2 text-medium-emphasis">Dependency</div>
+                  <v-chip
+                    size="small"
+                    variant="tonal"
+                    :color="riskLevelColor(dashboard.risk_indicators.dependency.level)"
+                  >
+                    {{ formatRiskLevel(dashboard.risk_indicators.dependency.level) }}
+                  </v-chip>
+                </div>
+                <div class="text-h5 mb-1">
+                  {{
+                    dashboard.risk_indicators.dependency.unavailable_reason
+                      ? '—'
+                      : dashboard.risk_indicators.dependency.at_risk_count
+                  }}
+                </div>
+                <div class="text-caption text-medium-emphasis">
+                  <template v-if="dashboard.risk_indicators.dependency.unavailable_reason">
+                    {{ dashboard.risk_indicators.dependency.unavailable_reason }}
+                  </template>
+                  <template v-else>
+                    {{ dashboard.risk_indicators.dependency.at_risk_count }} at risk ·
+                    {{ dashboard.risk_indicators.dependency.open_dependency_count }} open deps
+                  </template>
+                </div>
+              </v-card-text>
+            </v-card>
           </v-col>
         </v-row>
       </UiParentCard>

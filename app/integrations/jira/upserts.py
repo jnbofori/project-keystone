@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.jira.mappers import (
     adf_to_text,
+    extract_blocked_by_keys,
     extract_epic_key,
     extract_parent_key,
     extract_sprint_ids,
@@ -22,7 +23,7 @@ from app.models.epic import Epic
 from app.models.project import Project
 from app.models.sprint import Sprint
 from app.models.story import Story
-from app.models.task import Task
+from app.models.task import Task, TaskDependency
 from app.models.team_member import TeamMember
 
 
@@ -252,3 +253,32 @@ def upsert_task(
         if started_at and not task.started_at:
             task.started_at = started_at
     return task
+
+
+def sync_task_dependencies(
+    db: Session,
+    task: Task,
+    issue: dict[str, Any],
+    tasks_by_key: dict[str, Task],
+) -> None:
+    """Replace outgoing TaskDependency rows from Jira Blocks / is blocked by links."""
+    db.flush()
+    if task.id is None:
+        return
+
+    fields = issue.get("fields") or {}
+    depends_on_keys = extract_blocked_by_keys(fields)
+
+    db.query(TaskDependency).filter(TaskDependency.task_id == task.id).delete(
+        synchronize_session=False
+    )
+
+    seen: set[uuid.UUID] = set()
+    for key in depends_on_keys:
+        depends_on = tasks_by_key.get(key)
+        if depends_on is None or depends_on.id is None:
+            continue
+        if depends_on.id == task.id or depends_on.id in seen:
+            continue
+        seen.add(depends_on.id)
+        db.add(TaskDependency(task_id=task.id, depends_on_task_id=depends_on.id))

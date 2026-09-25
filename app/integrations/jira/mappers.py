@@ -237,6 +237,32 @@ def extract_parent_key(fields: dict[str, Any]) -> str | None:
     return key if isinstance(key, str) else None
 
 
+def _link_is_blocks_type(link_type: dict[str, Any]) -> bool:
+    name = (link_type.get("name") or "").strip().lower()
+    inward = (link_type.get("inward") or "").strip().lower()
+    outward = (link_type.get("outward") or "").strip().lower()
+    return "block" in name or "block" in inward or "block" in outward
+
+
+def extract_blocked_by_keys(fields: dict[str, Any]) -> list[str]:
+    """Issue keys that the current issue depends on via Blocks / is blocked by links."""
+    keys: list[str] = []
+    seen: set[str] = set()
+    for link in fields.get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        if not isinstance(link_type, dict) or not _link_is_blocks_type(link_type):
+            continue
+        # Current issue "is blocked by" inwardIssue → current depends on inwardIssue
+        inward = link.get("inwardIssue") or {}
+        inward_key = inward.get("key") if isinstance(inward, dict) else None
+        if isinstance(inward_key, str) and inward_key not in seen:
+            seen.add(inward_key)
+            keys.append(inward_key)
+    return keys
+
+
 def map_changelog_item(
     field: str,
     from_string: str | None,

@@ -13,7 +13,7 @@ from app.config import Settings, get_settings
 from app.integrations.jira.client import JiraClient
 from app.integrations.jira.errors import JiraAPIError
 from app.integrations.jira.mappers import classify_issue
-from app.integrations.jira.upserts import upsert_epic, upsert_story, upsert_task
+from app.integrations.jira.upserts import sync_task_dependencies, upsert_epic, upsert_story, upsert_task
 from app.models.enums import IntegrationSource
 from app.models.epic import Epic
 from app.models.jira_connection import JiraConnection
@@ -360,7 +360,7 @@ def handle_issue_webhook(
             story_points_field=story_points_field,
         )
     else:
-        upsert_task(
+        task = upsert_task(
             db,
             project,
             issue,
@@ -371,6 +371,7 @@ def handle_issue_webhook(
             sprints_by_jira_id=sprints_by_jira_id,
             story_points_field=story_points_field,
         )
+        sync_task_dependencies(db, task, issue, tasks_by_key)
     db.commit()
 
 

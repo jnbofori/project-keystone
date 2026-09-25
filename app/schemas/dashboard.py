@@ -46,6 +46,42 @@ class DashboardRisks(BaseModel):
     pace_label: str | None = None
 
 
+class DeliveryRiskIndicator(BaseModel):
+    level: str | None = None
+    historical_velocity: float | None = None
+    required_velocity: float | None = None
+    velocity_ratio: float | None = None
+    remaining_points: float = 0
+
+
+class ScopeRiskIndicator(BaseModel):
+    level: str | None = None
+    baseline_points: float = 0
+    current_points: float = 0
+    scope_added_points: float = 0
+    scope_growth_percent: float | None = None
+
+
+class DependencyRiskExample(BaseModel):
+    task: str
+    blocked_by: str
+    reason: str
+
+
+class DependencyRiskIndicator(BaseModel):
+    level: str | None = None
+    at_risk_count: int = 0
+    open_dependency_count: int = 0
+    examples: list[DependencyRiskExample] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
+class DashboardRiskIndicators(BaseModel):
+    delivery: DeliveryRiskIndicator = Field(default_factory=DeliveryRiskIndicator)
+    scope: ScopeRiskIndicator = Field(default_factory=ScopeRiskIndicator)
+    dependency: DependencyRiskIndicator = Field(default_factory=DependencyRiskIndicator)
+
+
 class DashboardStatusCount(BaseModel):
     status: str
     count: int
@@ -99,6 +135,7 @@ class ProjectDashboardResponse(BaseModel):
     time: DashboardTime
     velocity: DashboardVelocity
     risks: DashboardRisks
+    risk_indicators: DashboardRiskIndicators = Field(default_factory=DashboardRiskIndicators)
     flow: DashboardFlow
     load: DashboardLoad
     epic_health: list[DashboardEpicHealth] = Field(default_factory=list)

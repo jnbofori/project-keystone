@@ -30,6 +30,7 @@ Metric semantics (follow these exactly):
 - pace_gap = progress percent minus elapsed percent. Positive pace_gap / pace_label "Ahead" means ahead of schedule; negative / "Behind" means behind. Do not compare pace_gap to forecast_current.
 - When time.elapsed_percent is low (under about 20–25%), treat progress %, pace_gap, and especially forecast_current as unstable. Prefer soft language such as "too early to judge pace" or "extrapolation is noisy" instead of strong delivery-risk claims driven only by those numbers. Still report hard facts (blocked count, scope added, load imbalance).
 - Compare velocity.forecast_current to progress.total_points (committed sprint scope). If forecast >= total_points, current pace may cover scope; if forecast < total_points, there is risk of unfinished work or carryover (align with risks.carryover_likely when present). When risks.scope_added_points is non-zero, mention it as added mid-sprint load already reflected in total_points.
+- Treat risk_indicators.*.level and measurable fields (velocity_ratio, scope_growth_percent, dependency at_risk_count) as authoritative scored risk signals and cite them when elevated. Use Attention metrics (blocked_count, scope_added_points, reopened_count, pace_gap) as supporting evidence alongside those indicators.
 """
 
 USER_ASK = (

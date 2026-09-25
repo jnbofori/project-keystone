@@ -195,6 +195,42 @@ export interface DashboardRisks {
   pace_label: string | null;
 }
 
+export interface DeliveryRiskIndicator {
+  level: string | null;
+  historical_velocity: number | null;
+  required_velocity: number | null;
+  velocity_ratio: number | null;
+  remaining_points: number;
+}
+
+export interface ScopeRiskIndicator {
+  level: string | null;
+  baseline_points: number;
+  current_points: number;
+  scope_added_points: number;
+  scope_growth_percent: number | null;
+}
+
+export interface DependencyRiskExample {
+  task: string;
+  blocked_by: string;
+  reason: string;
+}
+
+export interface DependencyRiskIndicator {
+  level: string | null;
+  at_risk_count: number;
+  open_dependency_count: number;
+  examples: DependencyRiskExample[];
+  unavailable_reason?: string | null;
+}
+
+export interface DashboardRiskIndicators {
+  delivery: DeliveryRiskIndicator;
+  scope: ScopeRiskIndicator;
+  dependency: DependencyRiskIndicator;
+}
+
 export interface DashboardStatusCount {
   status: string;
   count: number;
@@ -248,6 +284,7 @@ export interface ProjectDashboard {
   time: DashboardTime;
   velocity: DashboardVelocity;
   risks: DashboardRisks;
+  risk_indicators: DashboardRiskIndicators;
   flow: DashboardFlow;
   load: DashboardLoad;
   epic_health: DashboardEpicHealth[];

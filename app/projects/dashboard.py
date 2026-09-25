@@ -19,7 +19,7 @@ from app.models.epic import Epic
 from app.models.project_event import ProjectEvent
 from app.models.sprint import Sprint
 from app.models.story import Story
-from app.models.task import Task
+from app.models.task import Task, TaskDependency
 from app.models.team_member import TeamMember
 from app.schemas.dashboard import (
     DashboardAgingItem,
@@ -29,17 +29,23 @@ from app.schemas.dashboard import (
     DashboardFlow,
     DashboardLoad,
     DashboardProgress,
+    DashboardRiskIndicators,
     DashboardRisks,
     DashboardSprint,
     DashboardStatusCount,
     DashboardTime,
     DashboardVelocity,
+    DeliveryRiskIndicator,
+    DependencyRiskExample,
+    DependencyRiskIndicator,
     ProjectDashboardResponse,
+    ScopeRiskIndicator,
 )
 
 AGING_WIP_DAYS = 3.0
 STALE_BLOCKED_DAYS = 2.0
 PACE_TOLERANCE = 10.0
+DEPENDENCY_DUE_SOON_DAYS = 2.0
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -362,6 +368,201 @@ def _compute_risks(
     )
 
 
+def _delivery_level(ratio: float | None) -> str | None:
+    if ratio is None:
+        return None
+    if ratio <= 1.0:
+        return "low"
+    if ratio <= 1.25:
+        return "medium"
+    return "high"
+
+
+def _scope_level(growth_percent: float | None) -> str | None:
+    if growth_percent is None:
+        return None
+    if growth_percent < 10.0:
+        return "low"
+    if growth_percent < 25.0:
+        return "medium"
+    return "high"
+
+
+def _compute_delivery_indicator(
+    progress: DashboardProgress,
+    time_info: DashboardTime,
+    velocity: DashboardVelocity,
+) -> DeliveryRiskIndicator:
+    remaining_points = round(max(progress.total_points - progress.completed_points, 0.0), 1)
+    historical = velocity.avg_3_sprint if velocity.avg_3_sprint is not None else velocity.last_sprint_points
+
+    required: float | None = None
+    ratio: float | None = None
+    if time_info.elapsed_percent is not None:
+        remaining_fraction = max(1.0 - time_info.elapsed_percent / 100.0, 0.01)
+        required = round(remaining_points / remaining_fraction, 1)
+        if historical is not None and historical > 0:
+            ratio = round(required / historical, 2)
+
+    return DeliveryRiskIndicator(
+        level=_delivery_level(ratio),
+        historical_velocity=historical,
+        required_velocity=required,
+        velocity_ratio=ratio,
+        remaining_points=remaining_points,
+    )
+
+
+def _compute_scope_indicator(
+    progress: DashboardProgress,
+    scope_added_points: float,
+) -> ScopeRiskIndicator:
+    current = progress.total_points
+    baseline = max(current - scope_added_points, 0.0)
+    growth: float | None = None
+    if baseline > 0:
+        growth = round((current - baseline) / baseline * 100.0, 1)
+
+    return ScopeRiskIndicator(
+        level=_scope_level(growth),
+        baseline_points=round(baseline, 1),
+        current_points=round(current, 1),
+        scope_added_points=scope_added_points,
+        scope_growth_percent=growth,
+    )
+
+
+def _dependency_upstream_at_risk(
+    depends_on: Task,
+    stories_by_id: dict[uuid.UUID, Story],
+) -> bool:
+    if depends_on.status == TaskStatus.blocked or depends_on.is_flagged:
+        return True
+    if depends_on.story_id:
+        story = stories_by_id.get(depends_on.story_id)
+        if story is not None and story.is_flagged and story.status not in (
+            StoryStatus.done,
+            StoryStatus.cancelled,
+        ):
+            return True
+    return False
+
+
+def _compute_dependency_indicator(
+    db: Session,
+    project_id: uuid.UUID,
+    tasks: list[Task],
+    stories: list[Story],
+) -> DependencyRiskIndicator:
+    any_deps = (
+        db.query(TaskDependency.id)
+        .join(Task, Task.id == TaskDependency.task_id)
+        .filter(Task.project_id == project_id)
+        .first()
+    )
+    if any_deps is None:
+        return DependencyRiskIndicator(
+            level=None,
+            at_risk_count=0,
+            open_dependency_count=0,
+            unavailable_reason="No dependency links synced",
+        )
+
+    open_tasks = [t for t in tasks if _task_open(t.status)]
+    if not open_tasks:
+        return DependencyRiskIndicator(level="low", at_risk_count=0, open_dependency_count=0)
+
+    open_ids = [t.id for t in open_tasks]
+    deps = (
+        db.query(TaskDependency)
+        .filter(TaskDependency.task_id.in_(open_ids))
+        .all()
+    )
+    if not deps:
+        return DependencyRiskIndicator(level="low", at_risk_count=0, open_dependency_count=0)
+
+    tasks_by_id = {t.id: t for t in db.query(Task).filter(Task.project_id == project_id).all()}
+    stories_by_id = {s.id: s for s in stories}
+    # Also load parent stories for dependency tasks that may be outside sprint
+    missing_story_ids = {
+        tasks_by_id[d.depends_on_task_id].story_id
+        for d in deps
+        if d.depends_on_task_id in tasks_by_id and tasks_by_id[d.depends_on_task_id].story_id
+    } - set(stories_by_id)
+    if missing_story_ids:
+        for story in db.query(Story).filter(Story.id.in_(missing_story_ids)).all():
+            stories_by_id[story.id] = story
+
+    now = _now()
+    due_cutoff = now + timedelta(days=DEPENDENCY_DUE_SOON_DAYS)
+    open_dependency_count = 0
+    at_risk_count = 0
+    examples: list[DependencyRiskExample] = []
+    seen_pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
+
+    for dep in deps:
+        task = tasks_by_id.get(dep.task_id)
+        depends_on = tasks_by_id.get(dep.depends_on_task_id)
+        if task is None or depends_on is None:
+            continue
+        if not _task_open(depends_on.status):
+            continue
+        open_dependency_count += 1
+
+        pair = (dep.task_id, dep.depends_on_task_id)
+        reason: str | None = None
+        if _dependency_upstream_at_risk(depends_on, stories_by_id):
+            reason = "depends on blocked or flagged work"
+        else:
+            due = _aware(task.due_date)
+            if due is not None and due <= due_cutoff:
+                reason = "due within 2 days while dependency still open"
+
+        if reason is None:
+            continue
+        at_risk_count += 1
+        if pair not in seen_pairs and len(examples) < 5:
+            seen_pairs.add(pair)
+            examples.append(
+                DependencyRiskExample(
+                    task=task.title,
+                    blocked_by=depends_on.title,
+                    reason=reason,
+                )
+            )
+
+    if at_risk_count > 0:
+        level = "high"
+    elif open_dependency_count > 0:
+        level = "medium"
+    else:
+        level = "low"
+
+    return DependencyRiskIndicator(
+        level=level,
+        at_risk_count=at_risk_count,
+        open_dependency_count=open_dependency_count,
+        examples=examples,
+    )
+
+
+def _compute_risk_indicators(
+    db: Session,
+    project_id: uuid.UUID,
+    stories: list[Story],
+    tasks: list[Task],
+    progress: DashboardProgress,
+    time_info: DashboardTime,
+    velocity: DashboardVelocity,
+    risks: DashboardRisks,
+) -> DashboardRiskIndicators:
+    return DashboardRiskIndicators(
+        delivery=_compute_delivery_indicator(progress, time_info, velocity),
+        scope=_compute_scope_indicator(progress, risks.scope_added_points),
+        dependency=_compute_dependency_indicator(db, project_id, tasks, stories),
+    )
+
+
 def _compute_flow(tasks: list[Task], sprint: Sprint) -> DashboardFlow:
     now = _now()
     status_counts: dict[str, int] = defaultdict(int)
@@ -491,7 +692,7 @@ def _compute_epic_health(db: Session, project_id: uuid.UUID, stories: list[Story
 
 def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashboardResponse:
     sprint, is_fallback = _select_focus_sprint(db, project_id)
-    
+
     if sprint is None:
         return ProjectDashboardResponse(
             project_id=project_id,
@@ -500,6 +701,7 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
             time=DashboardTime(),
             velocity=DashboardVelocity(),
             risks=DashboardRisks(),
+            risk_indicators=DashboardRiskIndicators(),
             flow=DashboardFlow(),
             load=DashboardLoad(),
             epic_health=[],
@@ -514,6 +716,9 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
     time_info = _compute_time(sprint)
     velocity = _compute_velocity(db, project_id, sprint, progress, time_info)
     risks = _compute_risks(db, project_id, sprint, stories, tasks, progress, time_info, velocity)
+    risk_indicators = _compute_risk_indicators(
+        db, project_id, stories, tasks, progress, time_info, velocity, risks
+    )
     flow = _compute_flow(tasks, sprint)
     load = _compute_load(stories, tasks, members)
     epic_health = _compute_epic_health(db, project_id, stories)
@@ -538,6 +743,7 @@ def build_project_dashboard(db: Session, project_id: uuid.UUID) -> ProjectDashbo
         time=time_info,
         velocity=velocity,
         risks=risks,
+        risk_indicators=risk_indicators,
         flow=flow,
         load=load,
         epic_health=epic_health,

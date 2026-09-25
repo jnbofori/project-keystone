@@ -18,6 +18,7 @@ from app.integrations.jira.mappers import (
     parse_jira_datetime,
 )
 from app.integrations.jira.upserts import (
+    sync_task_dependencies as _sync_task_dependencies,
     upsert_epic as _upsert_epic,
     upsert_story as _upsert_story,
     upsert_task as _upsert_task,
@@ -294,6 +295,7 @@ def _sync_issues(
         "resolutiondate",
         "labels",
         "sprint",
+        "issuelinks",
     ]
     if story_points_field:
         fields.append(story_points_field)
@@ -396,6 +398,21 @@ def _sync_issues(
             key = issue.get("key")
             result.errors.append(SyncError("task", key, str(exc)))
             logger.exception("Failed to upsert task %s", key)
+    db.flush()
+
+    # Pass 4: task dependencies from issuelinks (both ends must already exist)
+    for issue in issues:
+        if classify_issue(issue) != "task":
+            continue
+        key = issue.get("key")
+        task = tasks_by_key.get(key) if isinstance(key, str) else None
+        if task is None:
+            continue
+        try:
+            _sync_task_dependencies(db, task, issue, tasks_by_key)
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(SyncError("task_dependency", key, str(exc)))
+            logger.exception("Failed to sync dependencies for %s", key)
     db.flush()
 
     return epics_by_key, stories_by_key, tasks_by_key
