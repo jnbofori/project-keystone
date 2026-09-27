@@ -71,9 +71,9 @@ async function loadInsights() {
   insightsError.value = null;
   try {
     insights.value = await dashboardApi.getSprintInsights(props.projectId);
-  } catch (error) {
+  } catch {
     insights.value = null;
-    insightsError.value = getErrorMessage(error, 'Failed to generate sprint insights');
+    insightsError.value = 'Failed to generate sprint insights';
   } finally {
     insightsLoading.value = false;
   }

@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -11,15 +12,19 @@ from app.models.project import Project, ProjectMember, ProjectRole
 from app.models.user import User
 from app.organizations.dependencies import get_user_org_membership
 from app.projects.dashboard import build_project_dashboard
+from app.projects.delivery_forecast import build_project_delivery_forecast
 from app.projects.dependencies import require_project_member
 from app.projects.sprint_insights import generate_sprint_insights
 from app.schemas.dashboard import ProjectDashboardResponse, SprintInsightsResponse
+from app.schemas.delivery_forecast import ProjectDeliveryForecastResponse
 from app.schemas.project import (
     ProjectCreate,
     ProjectMemberCreate,
     ProjectMemberResponse,
     ProjectResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -95,6 +100,15 @@ def get_project_dashboard(
     return build_project_dashboard(db, project.id)
 
 
+@router.get("/{project_id}/delivery-forecast", response_model=ProjectDeliveryForecastResponse)
+def get_project_delivery_forecast(
+    project_membership: Annotated[tuple[Project, ProjectMember], Depends(require_project_member())],
+    db: Annotated[Session, Depends(get_db)],
+) -> ProjectDeliveryForecastResponse:
+    project, _ = project_membership
+    return build_project_delivery_forecast(db, project.id)
+
+
 @router.post("/{project_id}/dashboard/insights", response_model=SprintInsightsResponse)
 def get_sprint_insights(
     project_membership: Annotated[tuple[Project, ProjectMember], Depends(require_project_member())],
@@ -104,9 +118,10 @@ def get_sprint_insights(
     try:
         return generate_sprint_insights(db, project.id)
     except Exception as exc:
+        logger.exception("Sprint insights failed for project %s", project.id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to generate sprint insights: {exc}",
+            detail="Failed to generate sprint insights",
         ) from exc
 
 

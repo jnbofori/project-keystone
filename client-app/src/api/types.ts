@@ -313,6 +313,24 @@ export interface SprintInsights {
   generated_at: string;
 }
 
+export interface ProjectDeliveryForecast {
+  project_id: string;
+  remaining: number;
+  unit: 'points' | 'items' | string;
+  samples_used: number;
+  trials: number;
+  method: string;
+  p50_date: string | null;
+  p85_date: string | null;
+  p95_date: string | null;
+  already_complete: boolean;
+  unavailable_reason: string | null;
+  historical_rates: number[];
+  average_velocity: number | null;
+  estimated_sprints: number | null;
+  likely_sprints: number | null;
+}
+
 export const ROLE_RANK: Record<ProjectRole, number> = {
   viewer: 0,
   member: 1,

@@ -10,6 +10,7 @@ import QueryHistory from '@/components/projects/QueryHistory.vue';
 import MemberFormDialog from '@/components/projects/MemberFormDialog.vue';
 import JiraIntegrationPanel from '@/components/projects/JiraIntegrationPanel.vue';
 import ProjectDashboard from '@/components/projects/ProjectDashboard.vue';
+import ProjectDeliveryForecast from '@/components/projects/ProjectDeliveryForecast.vue';
 import { useProjectsStore } from '@/stores/projects';
 import { useProjectRole } from '@/composables/useProjectRole';
 import { useDocumentPolling } from '@/composables/useDocumentPolling';
@@ -217,6 +218,7 @@ watch(
 
     <v-tabs v-model="activeTab" color="primary" class="mt-4" show-arrows @update:model-value="onTabChange">
       <v-tab value="overview">Overview</v-tab>
+      <v-tab value="delivery">Delivery</v-tab>
       <v-tab v-if="permissions.canManageJira" value="jira">Jira</v-tab>
       <v-tab v-if="permissions.canManageMembers" value="members">Members</v-tab>
       <v-tab value="documents">Documents</v-tab>
@@ -226,6 +228,10 @@ watch(
     <v-window v-model="activeTab" class="mt-4">
       <v-window-item value="overview">
         <ProjectDashboard :project-id="projectId" />
+      </v-window-item>
+
+      <v-window-item value="delivery">
+        <ProjectDeliveryForecast :project-id="projectId" />
       </v-window-item>
 
       <v-window-item v-if="permissions.canManageJira" value="jira">
