@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     jira_acceptance_criteria_field: str = ""
     jira_webhook_base_url: str = ""
 
+    github_app_id: str = ""
+    github_app_slug: str = ""
+    github_app_private_key: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_webhook_secret: str = ""
+    github_frontend_redirect: str = "http://localhost:5173/settings/github?status="
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -44,6 +52,20 @@ class Settings(BaseSettings):
             and self.jira_oauth_client_secret
             and self.jira_oauth_redirect_uri
             and self.jira_token_encryption_key
+        )
+
+    @property
+    def github_private_key_pem(self) -> str:
+        return self.github_app_private_key.replace("\\n", "\n").strip()
+
+    @property
+    def github_app_configured(self) -> bool:
+        return bool(
+            self.github_app_id
+            and self.github_app_slug
+            and self.github_app_private_key
+            and self.github_client_id
+            and self.github_client_secret
         )
 
 

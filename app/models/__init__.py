@@ -15,10 +15,12 @@ from app.models.enums import (
     TaskStatus,
 )
 from app.models.epic import Epic
+from app.models.github_installation import GithubInstallation
 from app.models.jira_connection import JiraConnection
 from app.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.models.project import Project, ProjectMember, ProjectRole
 from app.models.project_event import ProjectEvent
+from app.models.project_github_repo import ProjectGithubRepo
 from app.models.pull_request import PullRequest
 from app.models.query_log import QueryLog
 from app.models.risk import Risk
@@ -53,6 +55,8 @@ __all__ = [
     "Risk",
     "ProjectEvent",
     "JiraConnection",
+    "GithubInstallation",
+    "ProjectGithubRepo",
     "IntegrationSource",
     "SprintStatus",
     "EpicStatus",

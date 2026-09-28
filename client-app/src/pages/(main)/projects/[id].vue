@@ -9,6 +9,7 @@ import QueryPanel from '@/components/projects/QueryPanel.vue';
 import QueryHistory from '@/components/projects/QueryHistory.vue';
 import MemberFormDialog from '@/components/projects/MemberFormDialog.vue';
 import JiraIntegrationPanel from '@/components/projects/JiraIntegrationPanel.vue';
+import GithubIntegrationPanel from '@/components/projects/GithubIntegrationPanel.vue';
 import ProjectDashboard from '@/components/projects/ProjectDashboard.vue';
 import ProjectDeliveryForecast from '@/components/projects/ProjectDeliveryForecast.vue';
 import { useProjectsStore } from '@/stores/projects';
@@ -71,6 +72,10 @@ function applyTabFromQuery() {
   const tab = route.query.tab;
   if (typeof tab === 'string' && tab) {
     if (tab === 'jira' && !permissions.value.canManageJira) {
+      activeTab.value = 'overview';
+      return;
+    }
+    if (tab === 'github' && !permissions.value.canManageGithub) {
       activeTab.value = 'overview';
       return;
     }
@@ -220,6 +225,7 @@ watch(
       <v-tab value="overview">Overview</v-tab>
       <v-tab value="delivery">Delivery</v-tab>
       <v-tab v-if="permissions.canManageJira" value="jira">Jira</v-tab>
+      <v-tab v-if="permissions.canManageGithub" value="github">GitHub</v-tab>
       <v-tab v-if="permissions.canManageMembers" value="members">Members</v-tab>
       <v-tab value="documents">Documents</v-tab>
       <v-tab value="ask">Ask</v-tab>
@@ -240,6 +246,10 @@ watch(
           :linked-jira-key="project?.jira_project_key"
           @linked="handleJiraLinked"
         />
+      </v-window-item>
+
+      <v-window-item v-if="permissions.canManageGithub" value="github">
+        <GithubIntegrationPanel :project-id="projectId" />
       </v-window-item>
 
       <v-window-item v-if="permissions.canManageMembers" value="members">

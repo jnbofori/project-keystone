@@ -34,6 +34,7 @@ declare module 'vue-router/auto-routes' {
       | '/(main)/dashboard/default'
       | '/(main)/projects/'
       | '/(main)/projects/[id]'
+      | '/(main)/settings/github'
       | '/(main)/settings/jira'
       | '/(main)/settings/organization'
       | '/(main)/starter'
@@ -60,6 +61,13 @@ declare module 'vue-router/auto-routes' {
       '/projects/:id',
       { id: ParamValue<true> },
       { id: ParamValue<false> },
+      | never
+    >,
+    '/(main)/settings/github': RouteRecordInfo<
+      '/(main)/settings/github',
+      '/settings/github',
+      Record<never, never>,
+      Record<never, never>,
       | never
     >,
     '/(main)/settings/jira': RouteRecordInfo<
@@ -144,6 +152,7 @@ declare module 'vue-router/auto-routes' {
         | '/(main)/dashboard/default'
         | '/(main)/projects/'
         | '/(main)/projects/[id]'
+        | '/(main)/settings/github'
         | '/(main)/settings/jira'
         | '/(main)/settings/organization'
         | '/(main)/starter'
@@ -168,6 +177,12 @@ declare module 'vue-router/auto-routes' {
     'src/pages/(main)/projects/[id].vue': {
       routes:
         | '/(main)/projects/[id]'
+      views:
+        | never
+    }
+    'src/pages/(main)/settings/github.vue': {
+      routes:
+        | '/(main)/settings/github'
       views:
         | never
     }

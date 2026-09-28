@@ -155,6 +155,93 @@ export interface JiraSyncResponse {
   errors: JiraSyncErrorItem[];
 }
 
+export interface GithubInstallStartResponse {
+  install_url: string;
+}
+
+export interface GithubInstallation {
+  id: string;
+  installation_id: number;
+  account_login: string;
+  account_type: string | null;
+  account_avatar_url: string | null;
+  repository_selection: string | null;
+  connected_by: string;
+  suspended_at: string | null;
+  created_at: string;
+}
+
+export interface GithubRepoSummary {
+  repo_id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string | null;
+  html_url: string | null;
+  installation_id: string;
+  account_login: string;
+}
+
+export interface GithubLinkedRepo {
+  id: string;
+  repo_id: number;
+  full_name: string;
+  default_branch: string | null;
+  html_url: string | null;
+  installation_id: string;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
+export interface GithubSyncErrorItem {
+  repo: string;
+  message: string;
+}
+
+export interface GithubSyncResponse {
+  project_id: string;
+  repos: number;
+  pull_requests: number;
+  commits: number;
+  errors: GithubSyncErrorItem[];
+}
+
+export type GithubPullRequestStatus = 'open' | 'merged' | 'closed';
+
+export interface GithubPullRequestItem {
+  id: string;
+  repo_full_name: string | null;
+  number: number | null;
+  title: string;
+  url: string | null;
+  status: GithubPullRequestStatus;
+  draft: boolean;
+  author_login: string | null;
+  head_branch: string | null;
+  base_branch: string | null;
+  jira_keys: string[];
+  opened_at: string | null;
+  merged_at: string | null;
+  closed_at: string | null;
+  github_updated_at: string | null;
+}
+
+export interface GithubCommitItem {
+  id: string;
+  repo_full_name: string | null;
+  sha: string;
+  message: string | null;
+  url: string | null;
+  author_login: string | null;
+  author_name: string | null;
+  committed_at: string | null;
+  jira_keys: string[];
+}
+
+export interface GithubActivityResponse {
+  pull_requests: GithubPullRequestItem[];
+  commits: GithubCommitItem[];
+}
+
 export interface DashboardSprint {
   id: string;
   name: string;

@@ -8,6 +8,7 @@ from app.auth.router import router as auth_router
 from app.config import get_settings
 from app.database import engine
 from app.documents.router import router as documents_router
+from app.integrations.github.router import router as github_router
 from app.integrations.jira.router import router as jira_router
 from app.organizations.router import router as organizations_router
 from app.projects.router import router as projects_router
@@ -39,6 +40,7 @@ app.include_router(projects_router)
 app.include_router(documents_router)
 app.include_router(queries_router)
 app.include_router(jira_router)
+app.include_router(github_router)
 
 
 @app.get("/")

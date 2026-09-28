@@ -5,13 +5,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.project_github_repo import ProjectGithubRepo
     from app.models.pull_request import PullRequest
     from app.models.team_member import TeamMember
 
@@ -32,8 +33,17 @@ class Commit(Base):
     pull_request_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("pull_requests.id"), nullable=True
     )
+    repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("project_github_repos.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    author_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    jira_keys: Mapped[list[str]] = mapped_column(
+        ARRAY(String(64)), default=list, server_default="{}", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship(back_populates="commits")
+    repo_link: Mapped["ProjectGithubRepo | None"] = relationship()
     author: Mapped["TeamMember | None"] = relationship(back_populates="authored_commits")
     pull_request: Mapped["PullRequest | None"] = relationship(back_populates="commits")

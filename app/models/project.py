@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from app.models.epic import Epic
     from app.models.organization import Organization
     from app.models.project_event import ProjectEvent
+    from app.models.project_github_repo import ProjectGithubRepo
     from app.models.pull_request import PullRequest
     from app.models.query_log import QueryLog
     from app.models.risk import Risk
@@ -80,6 +81,9 @@ class Project(Base):
     discussions: Mapped[list["Discussion"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     risks: Mapped[list["Risk"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     events: Mapped[list["ProjectEvent"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    github_repos: Mapped[list["ProjectGithubRepo"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class ProjectMember(Base):

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.github_installation import GithubInstallation
     from app.models.jira_connection import JiraConnection
     from app.models.project import Project
     from app.models.user import User
@@ -48,6 +49,11 @@ class Organization(Base):
         back_populates="organization",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    github_installations: Mapped[list["GithubInstallation"]] = relationship(
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     creator: Mapped["User"] = relationship(foreign_keys=[created_by])
 

@@ -7,6 +7,7 @@ export function useOrgRole(role: OrganizationRole | null | undefined) {
   return {
     canManageOrg: rank >= ORG_ROLE_RANK.admin,
     canConnectJira: rank >= ORG_ROLE_RANK.admin,
+    canConnectGithub: rank >= ORG_ROLE_RANK.admin,
     canRotateInvite: rank >= ORG_ROLE_RANK.admin,
     canChangeMemberRoles: rank >= ORG_ROLE_RANK.admin,
     isOwner: role === 'owner'

@@ -3,8 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import BaseBreadcrumb from '@/components/shared/BaseBreadcrumb.vue';
 import UiParentCard from '@/components/shared/UiParentCard.vue';
-import { jiraApi } from '@/api';
-import type { JiraConnection, OrganizationRole } from '@/api/types';
+import { githubApi, jiraApi } from '@/api';
+import type { GithubInstallation, JiraConnection, OrganizationRole } from '@/api/types';
 import { useOrgRole } from '@/composables/useOrgRole';
 import { useSnackbar } from '@/composables/useSnackbar';
 import { useAuthStore } from '@/stores/auth';
@@ -25,6 +25,12 @@ const disconnecting = ref(false);
 const selectingCloud = ref(false);
 const rotating = ref(false);
 const copying = ref(false);
+
+const githubSection = ref<HTMLElement | null>(null);
+const githubInstallations = ref<GithubInstallation[]>([]);
+const githubLoading = ref(false);
+const githubInstalling = ref(false);
+const githubRemovingId = ref<string | null>(null);
 
 const orgPermissions = computed(() => useOrgRole(orgStore.currentRole));
 const connected = computed(() => Boolean(connection.value?.connected));
@@ -128,6 +134,42 @@ async function saveCloud() {
   }
 }
 
+async function loadGithubInstallations() {
+  githubLoading.value = true;
+  try {
+    githubInstallations.value = await githubApi.listInstallations();
+  } catch (error) {
+    showError(getErrorMessage(error, 'Failed to load GitHub installations'));
+    githubInstallations.value = [];
+  } finally {
+    githubLoading.value = false;
+  }
+}
+
+async function installGithub() {
+  githubInstalling.value = true;
+  try {
+    const { install_url } = await githubApi.startInstall();
+    window.location.href = install_url;
+  } catch (error) {
+    showError(getErrorMessage(error, 'Failed to start GitHub App installation'));
+    githubInstalling.value = false;
+  }
+}
+
+async function removeGithubInstallation(installation: GithubInstallation) {
+  githubRemovingId.value = installation.id;
+  try {
+    await githubApi.removeInstallation(installation.id);
+    githubInstallations.value = githubInstallations.value.filter((i) => i.id !== installation.id);
+    showSuccess(`GitHub account ${installation.account_login} removed`);
+  } catch (error) {
+    showError(getErrorMessage(error, 'Failed to remove GitHub installation'));
+  } finally {
+    githubRemovingId.value = null;
+  }
+}
+
 async function rotateInvite() {
   rotating.value = true;
   try {
@@ -167,21 +209,23 @@ async function changeMemberRole(userId: string, role: OrganizationRole) {
   }
 }
 
-function scrollToJiraIfNeeded() {
+function scrollToSectionIfNeeded() {
   if (route.query.section === 'jira' || route.hash === '#jira') {
     jiraSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else if (route.query.section === 'github' || route.hash === '#github') {
+    githubSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
 onMounted(async () => {
   await loadOrganization();
-  await loadJiraConnection();
-  scrollToJiraIfNeeded();
+  await Promise.all([loadJiraConnection(), loadGithubInstallations()]);
+  scrollToSectionIfNeeded();
 });
 
 watch(
   () => route.query.section,
-  () => scrollToJiraIfNeeded()
+  () => scrollToSectionIfNeeded()
 );
 </script>
 
@@ -325,6 +369,66 @@ watch(
             </v-alert>
           </div>
         </template>
+      </UiParentCard>
+    </div>
+
+    <div ref="githubSection" id="github">
+      <UiParentCard title="GitHub" class="mt-4">
+        <p class="text-medium-emphasis mb-4">
+          Install the Keystone GitHub App on one or more GitHub accounts or organizations. Projects can
+          then link any of the repositories you grant access to.
+        </p>
+
+        <v-alert v-if="!orgPermissions.canConnectGithub" type="info" variant="tonal" class="mb-4">
+          Only organization owners and admins can connect GitHub accounts.
+        </v-alert>
+
+        <v-progress-linear v-if="githubLoading" indeterminate color="primary" class="mb-4" />
+
+        <v-list v-else-if="githubInstallations.length" lines="two" class="mb-4 pa-0">
+          <v-list-item v-for="installation in githubInstallations" :key="installation.id" class="px-0">
+            <template #prepend>
+              <v-avatar size="36" class="mr-3">
+                <v-img v-if="installation.account_avatar_url" :src="installation.account_avatar_url" />
+                <v-icon v-else icon="$github" />
+              </v-avatar>
+            </template>
+            <v-list-item-title class="d-flex align-center ga-2">
+              {{ installation.account_login }}
+              <v-chip v-if="installation.suspended_at" color="warning" size="x-small" variant="tonal">
+                Suspended
+              </v-chip>
+            </v-list-item-title>
+            <v-list-item-subtitle>
+              {{ installation.account_type || 'Account' }} ·
+              {{ installation.repository_selection === 'all' ? 'All repositories' : 'Selected repositories' }}
+            </v-list-item-subtitle>
+            <template v-if="orgPermissions.canConnectGithub" #append>
+              <v-btn
+                color="error"
+                variant="text"
+                size="small"
+                :loading="githubRemovingId === installation.id"
+                @click="removeGithubInstallation(installation)"
+              >
+                Remove
+              </v-btn>
+            </template>
+          </v-list-item>
+        </v-list>
+
+        <v-alert v-else type="info" variant="tonal" class="mb-4">No GitHub accounts connected yet.</v-alert>
+
+        <v-btn
+          v-if="orgPermissions.canConnectGithub"
+          color="primary"
+          variant="flat"
+          prepend-icon="$github"
+          :loading="githubInstalling"
+          @click="installGithub"
+        >
+          {{ githubInstallations.length ? 'Add GitHub account' : 'Install GitHub App' }}
+        </v-btn>
       </UiParentCard>
     </div>
   </template>

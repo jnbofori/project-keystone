@@ -9,6 +9,7 @@ export function useProjectRole(role: ProjectRole | null | undefined) {
     canUpload: rank >= ROLE_RANK.member,
     canManageMembers: rank >= ROLE_RANK.admin,
     canManageJira: rank >= ROLE_RANK.admin,
+    canManageGithub: rank >= ROLE_RANK.admin,
     canDeleteDocuments: rank >= ROLE_RANK.admin,
     canViewQueryHistory: rank >= ROLE_RANK.member
   };
