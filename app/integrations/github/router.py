@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.security import get_current_user
@@ -27,6 +27,7 @@ from app.integrations.github.errors import GithubAPIError
 from app.integrations.github.sync import sync_project_github
 from app.integrations.github.webhooks import handle_event, verify_signature
 from app.models.commit import Commit
+from app.models.github_branch import GithubBranch
 from app.models.github_installation import GithubInstallation
 from app.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.models.project import ROLE_RANK, Project, ProjectMember, ProjectRole
@@ -37,6 +38,7 @@ from app.organizations.dependencies import require_org_member
 from app.projects.dependencies import require_project_member
 from app.schemas.github import (
     GithubActivityResponse,
+    GithubBranchItem,
     GithubCommitItem,
     GithubInstallation as GithubInstallationSchema,
     GithubInstallStartResponse,
@@ -370,6 +372,7 @@ def sync_project_from_github(
         repos=result.repos,
         pull_requests=result.pull_requests,
         commits=result.commits,
+        branches=result.branches,
         errors=[GithubSyncErrorItem(repo=e.repo, message=e.message) for e in result.errors],
     )
 
@@ -388,6 +391,7 @@ def get_github_activity(
 
     pull_requests = (
         db.query(PullRequest)
+        .options(joinedload(PullRequest.task), joinedload(PullRequest.story))
         .filter(PullRequest.project_id == project.id, PullRequest.repo_link_id.isnot(None))
         .order_by(func.coalesce(PullRequest.github_updated_at, PullRequest.opened_at).desc().nullslast())
         .limit(limit)
@@ -395,8 +399,17 @@ def get_github_activity(
     )
     commits = (
         db.query(Commit)
+        .options(joinedload(Commit.task), joinedload(Commit.story))
         .filter(Commit.project_id == project.id, Commit.repo_link_id.isnot(None))
         .order_by(Commit.committed_at.desc().nullslast())
+        .limit(limit)
+        .all()
+    )
+    branches = (
+        db.query(GithubBranch)
+        .options(joinedload(GithubBranch.task), joinedload(GithubBranch.story))
+        .filter(GithubBranch.project_id == project.id)
+        .order_by(GithubBranch.updated_at.desc())
         .limit(limit)
         .all()
     )
@@ -415,6 +428,8 @@ def get_github_activity(
                 head_branch=pr.head_branch,
                 base_branch=pr.base_branch,
                 jira_keys=list(pr.jira_keys or []),
+                task_key=pr.task.external_key if pr.task else None,
+                story_key=pr.story.external_key if pr.story else None,
                 opened_at=pr.opened_at,
                 merged_at=pr.merged_at,
                 closed_at=pr.closed_at,
@@ -433,8 +448,22 @@ def get_github_activity(
                 author_name=c.author_name,
                 committed_at=c.committed_at,
                 jira_keys=list(c.jira_keys or []),
+                task_key=c.task.external_key if c.task else None,
+                story_key=c.story.external_key if c.story else None,
             )
             for c in commits
+        ],
+        branches=[
+            GithubBranchItem(
+                id=b.id,
+                repo_full_name=links.get(b.repo_link_id),
+                name=b.name,
+                head_sha=b.head_sha,
+                jira_keys=list(b.jira_keys or []),
+                task_key=b.task.external_key if b.task else None,
+                story_key=b.story.external_key if b.story else None,
+            )
+            for b in branches
         ],
     )
 

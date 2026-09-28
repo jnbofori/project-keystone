@@ -61,6 +61,7 @@ class GithubSyncResponse(BaseModel):
     repos: int = 0
     pull_requests: int = 0
     commits: int = 0
+    branches: int = 0
     errors: list[GithubSyncErrorItem] = Field(default_factory=list)
 
 
@@ -76,6 +77,8 @@ class GithubPullRequestItem(BaseModel):
     head_branch: str | None = None
     base_branch: str | None = None
     jira_keys: list[str] = Field(default_factory=list)
+    task_key: str | None = None
+    story_key: str | None = None
     opened_at: datetime | None = None
     merged_at: datetime | None = None
     closed_at: datetime | None = None
@@ -92,8 +95,21 @@ class GithubCommitItem(BaseModel):
     author_name: str | None = None
     committed_at: datetime | None = None
     jira_keys: list[str] = Field(default_factory=list)
+    task_key: str | None = None
+    story_key: str | None = None
+
+
+class GithubBranchItem(BaseModel):
+    id: uuid.UUID
+    repo_full_name: str | None = None
+    name: str
+    head_sha: str | None = None
+    jira_keys: list[str] = Field(default_factory=list)
+    task_key: str | None = None
+    story_key: str | None = None
 
 
 class GithubActivityResponse(BaseModel):
     pull_requests: list[GithubPullRequestItem] = Field(default_factory=list)
     commits: list[GithubCommitItem] = Field(default_factory=list)
+    branches: list[GithubBranchItem] = Field(default_factory=list)

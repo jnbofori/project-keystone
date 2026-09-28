@@ -55,6 +55,23 @@ const scopeSignalCaption = computed(() => {
   return parts.join(' · ');
 });
 
+const reviewCaption = computed(() => {
+  const review = dashboard.value?.risk_indicators?.review;
+  if (!review) return '';
+  const parts = [`${review.open_pr_count} sprint PR${review.open_pr_count === 1 ? '' : 's'}`];
+  if (review.normal_median_days !== null) {
+    const ratio = review.age_ratio !== null ? ` (${review.age_ratio}x)` : '';
+    const source = review.baseline_source === 'default' ? ' (default baseline)' : '';
+    parts.push(`normal ${review.normal_median_days}d${ratio}${source}`);
+  }
+  if (review.points_in_review) {
+    parts.push(`${formatPoints(review.points_in_review)} ${review.uses_points ? 'pts' : 'items'} in review`);
+  }
+  return parts.join(' · ');
+});
+
+const oldestReviewPr = computed(() => dashboard.value?.risk_indicators?.review?.examples?.[0] ?? null);
+
 const insightParagraphs = computed(() => {
   const text = insights.value?.insight?.trim();
   if (!text) return [];
@@ -258,7 +275,7 @@ defineExpose({ reload: load });
         class="mt-4"
       >
         <v-row>
-          <v-col cols="12" md="4">
+          <v-col cols="12" sm="6" md="3">
             <v-card variant="outlined" class="h-100">
               <v-card-text>
                 <div class="d-flex align-center justify-space-between mb-2">
@@ -286,7 +303,7 @@ defineExpose({ reload: load });
               </v-card-text>
             </v-card>
           </v-col>
-          <v-col cols="12" md="4">
+          <v-col cols="12" sm="6" md="3">
             <v-card variant="outlined" class="h-100">
               <v-card-text>
                 <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
@@ -333,7 +350,7 @@ defineExpose({ reload: load });
               </v-card-text>
             </v-card>
           </v-col>
-          <v-col cols="12" md="4">
+          <v-col cols="12" sm="6" md="3">
             <v-card variant="outlined" class="h-100">
               <v-card-text>
                 <div class="d-flex align-center justify-space-between mb-2">
@@ -361,6 +378,75 @@ defineExpose({ reload: load });
                     {{ dashboard.risk_indicators.dependency.at_risk_count }} at risk ·
                     {{ dashboard.risk_indicators.dependency.open_dependency_count }} open deps
                   </template>
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col v-if="dashboard.risk_indicators.review" cols="12" sm="6" md="3">
+            <v-card variant="outlined" class="h-100">
+              <v-card-text>
+                <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
+                  <div class="text-body-2 text-medium-emphasis">Review</div>
+                  <div class="d-flex flex-wrap ga-1">
+                    <v-chip
+                      v-if="dashboard.risk_indicators.review.bottleneck_detected"
+                      size="small"
+                      variant="tonal"
+                      color="warning"
+                    >
+                      Code review bottleneck
+                    </v-chip>
+                    <v-chip
+                      size="small"
+                      variant="tonal"
+                      :color="riskLevelColor(dashboard.risk_indicators.review.level)"
+                    >
+                      {{ formatRiskLevel(dashboard.risk_indicators.review.level) }}
+                    </v-chip>
+                  </div>
+                </div>
+                <div class="text-h5 mb-1">
+                  {{
+                    dashboard.risk_indicators.review.median_open_age_days !== null &&
+                    !dashboard.risk_indicators.review.unavailable_reason
+                      ? `${dashboard.risk_indicators.review.median_open_age_days}d`
+                      : '—'
+                  }}
+                </div>
+                <div class="text-caption text-medium-emphasis mb-1">
+                  <template v-if="dashboard.risk_indicators.review.unavailable_reason">
+                    {{ dashboard.risk_indicators.review.unavailable_reason }}
+                  </template>
+                  <template v-else>{{ reviewCaption }}</template>
+                </div>
+                <div
+                  v-if="dashboard.risk_indicators.review.summary && dashboard.risk_indicators.review.level !== 'low'"
+                  class="text-body-2 mb-1"
+                >
+                  {{ dashboard.risk_indicators.review.summary }}
+                </div>
+                <div
+                  v-if="oldestReviewPr && dashboard.risk_indicators.review.level !== 'low'"
+                  class="d-flex align-center flex-wrap ga-1 text-caption mb-1"
+                >
+                  <span class="text-medium-emphasis">Oldest:</span>
+                  <a v-if="oldestReviewPr.url" :href="oldestReviewPr.url" target="_blank" rel="noopener">
+                    {{ oldestReviewPr.repo }}<span v-if="oldestReviewPr.number">#{{ oldestReviewPr.number }}</span>
+                  </a>
+                  <span v-else>{{ oldestReviewPr.title }}</span>
+                  <span class="text-medium-emphasis">({{ oldestReviewPr.age_days }}d)</span>
+                  <v-chip v-if="oldestReviewPr.jira_key" size="x-small" color="primary" variant="outlined">
+                    {{ oldestReviewPr.jira_key }}
+                  </v-chip>
+                </div>
+                <div
+                  v-if="dashboard.risk_indicators.review.unlinked_open_pr_count > 0"
+                  class="text-caption text-medium-emphasis"
+                >
+                  {{ dashboard.risk_indicators.review.unlinked_open_pr_count }} open PR{{
+                    dashboard.risk_indicators.review.unlinked_open_pr_count === 1 ? '' : 's'
+                  }}
+                  not linked to Jira
                 </div>
               </v-card-text>
             </v-card>

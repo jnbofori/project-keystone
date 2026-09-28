@@ -66,6 +66,14 @@ def map_pull_request(pr: dict[str, Any], project_key: str | None) -> dict[str, A
     }
 
 
+def map_branch(name: str, head_sha: str | None, project_key: str | None) -> dict[str, Any]:
+    return {
+        "name": name[:255],
+        "head_sha": head_sha,
+        "jira_keys": extract_jira_keys(name, project_key=project_key),
+    }
+
+
 def map_commit(item: dict[str, Any], project_key: str | None) -> dict[str, Any]:
     """Map a commit from the REST `GET /repos/{repo}/commits` list."""
     commit = item.get("commit") or {}

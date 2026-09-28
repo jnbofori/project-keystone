@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.commit import Commit
     from app.models.project import Project
     from app.models.project_github_repo import ProjectGithubRepo
+    from app.models.story import Story
     from app.models.task import Task
     from app.models.team_member import TeamMember
 
@@ -50,7 +51,12 @@ class PullRequest(Base):
     author_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("team_members.id"), nullable=True
     )
-    task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id"), nullable=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    story_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
+    )
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -75,5 +81,6 @@ class PullRequest(Base):
     project: Mapped["Project"] = relationship(back_populates="pull_requests")
     author: Mapped["TeamMember | None"] = relationship(back_populates="authored_pull_requests")
     task: Mapped["Task | None"] = relationship(back_populates="pull_requests")
+    story: Mapped["Story | None"] = relationship(back_populates="pull_requests")
     commits: Mapped[list["Commit"]] = relationship(back_populates="pull_request")
     repo_link: Mapped["ProjectGithubRepo | None"] = relationship()

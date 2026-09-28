@@ -9,6 +9,7 @@ from pprint import pprint
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.integrations.github.linking import relink_project
 from app.integrations.jira.client import JiraClient
 from app.integrations.jira.errors import JiraAPIError
 from app.integrations.jira.mappers import (
@@ -109,6 +110,7 @@ def sync_jira_project(
             tasks_by_key=tasks_by_key,
         )
 
+    relink_project(db, project)
     db.commit()
     return result
 

@@ -9,8 +9,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.integrations.github.app_auth import forget_installation_token
-from app.integrations.github.mappers import map_pull_request, map_push_commit
-from app.integrations.github.sync import upsert_commit, upsert_pull_request
+from app.integrations.github.mappers import map_branch, map_pull_request, map_push_commit
+from app.integrations.github.sync import delete_branch, upsert_branch, upsert_commit, upsert_pull_request
 from app.models.github_installation import GithubInstallation
 from app.models.project_github_repo import ProjectGithubRepo
 
@@ -100,8 +100,21 @@ def _handle_push(db: Session, payload: dict[str, Any]) -> str:
     if not links:
         return "ignored"
     ref = str(payload.get("ref") or "")
+    branch_name = ref.removeprefix("refs/heads/") if ref.startswith("refs/heads/") else None
     handled = False
     for link in links:
+        if branch_name:
+            if payload.get("deleted"):
+                delete_branch(db, link, branch_name)
+            else:
+                upsert_branch(
+                    db,
+                    link.project,
+                    link,
+                    map_branch(branch_name, payload.get("after"), link.project.jira_project_key),
+                )
+            handled = True
+
         default_branch = link.default_branch or (payload.get("repository") or {}).get("default_branch")
         if default_branch and ref != f"refs/heads/{default_branch}":
             continue
@@ -111,6 +124,24 @@ def _handle_push(db: Session, payload: dict[str, Any]) -> str:
                 handled = True
     if not handled:
         return "ignored"
+    db.commit()
+    return "ok"
+
+
+def _handle_branch_ref(db: Session, event: str, payload: dict[str, Any]) -> str:
+    if payload.get("ref_type") != "branch" or not payload.get("ref"):
+        return "ignored"
+    links = _links_for_repo(db, payload)
+    if not links:
+        return "ignored"
+    name = str(payload["ref"])
+    for link in links:
+        if event == "delete":
+            delete_branch(db, link, name)
+        else:
+            data = map_branch(name, None, link.project.jira_project_key)
+            data.pop("head_sha")
+            upsert_branch(db, link.project, link, data)
     db.commit()
     return "ok"
 
@@ -125,4 +156,6 @@ def handle_event(db: Session, event: str, payload: dict[str, Any]) -> str:
         return _handle_pull_request(db, payload)
     if event == "push":
         return _handle_push(db, payload)
+    if event in ("create", "delete"):
+        return _handle_branch_ref(db, event, payload)
     return "ignored"

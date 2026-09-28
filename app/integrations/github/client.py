@@ -94,6 +94,9 @@ class GithubClient:
                 return
             yield pr
 
+    def list_branches(self, full_name: str) -> Iterator[dict[str, Any]]:
+        yield from self._paginate(f"/repos/{full_name}/branches")
+
     def list_commits(self, full_name: str, branch: str | None, since: datetime) -> Iterator[dict[str, Any]]:
         params: dict[str, Any] = {"since": since.isoformat()}
         if branch:

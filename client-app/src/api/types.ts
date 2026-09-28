@@ -202,6 +202,7 @@ export interface GithubSyncResponse {
   repos: number;
   pull_requests: number;
   commits: number;
+  branches: number;
   errors: GithubSyncErrorItem[];
 }
 
@@ -219,6 +220,8 @@ export interface GithubPullRequestItem {
   head_branch: string | null;
   base_branch: string | null;
   jira_keys: string[];
+  task_key: string | null;
+  story_key: string | null;
   opened_at: string | null;
   merged_at: string | null;
   closed_at: string | null;
@@ -235,11 +238,24 @@ export interface GithubCommitItem {
   author_name: string | null;
   committed_at: string | null;
   jira_keys: string[];
+  task_key: string | null;
+  story_key: string | null;
+}
+
+export interface GithubBranchItem {
+  id: string;
+  repo_full_name: string | null;
+  name: string;
+  head_sha: string | null;
+  jira_keys: string[];
+  task_key: string | null;
+  story_key: string | null;
 }
 
 export interface GithubActivityResponse {
   pull_requests: GithubPullRequestItem[];
   commits: GithubCommitItem[];
+  branches: GithubBranchItem[];
 }
 
 export interface DashboardSprint {
@@ -328,10 +344,39 @@ export interface DependencyRiskIndicator {
   unavailable_reason?: string | null;
 }
 
+export interface ReviewRiskExample {
+  title: string;
+  repo: string | null;
+  number: number | null;
+  url: string | null;
+  age_days: number;
+  author_login: string | null;
+  jira_key: string | null;
+  work_item_title: string | null;
+}
+
+export interface ReviewRiskIndicator {
+  level: string | null;
+  bottleneck_detected: boolean;
+  open_pr_count: number;
+  median_open_age_days: number | null;
+  normal_median_days: number | null;
+  age_ratio: number | null;
+  baseline_source: 'sprint_history' | 'project' | 'default' | null;
+  baseline_sample_size: number;
+  points_in_review: number;
+  uses_points: boolean;
+  unlinked_open_pr_count: number;
+  summary: string | null;
+  examples: ReviewRiskExample[];
+  unavailable_reason?: string | null;
+}
+
 export interface DashboardRiskIndicators {
   delivery: DeliveryRiskIndicator;
   scope: ScopeRiskIndicator;
   dependency: DependencyRiskIndicator;
+  review: ReviewRiskIndicator;
 }
 
 export interface DashboardStatusCount {

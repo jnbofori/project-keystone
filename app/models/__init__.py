@@ -15,6 +15,7 @@ from app.models.enums import (
     TaskStatus,
 )
 from app.models.epic import Epic
+from app.models.github_branch import GithubBranch
 from app.models.github_installation import GithubInstallation
 from app.models.jira_connection import JiraConnection
 from app.models.organization import Organization, OrganizationMember, OrganizationRole
@@ -56,6 +57,7 @@ __all__ = [
     "ProjectEvent",
     "JiraConnection",
     "GithubInstallation",
+    "GithubBranch",
     "ProjectGithubRepo",
     "IntegrationSource",
     "SprintStatus",

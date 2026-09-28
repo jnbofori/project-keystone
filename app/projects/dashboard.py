@@ -1,22 +1,27 @@
 from __future__ import annotations
 
+import statistics
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
 from pprint import pprint
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.enums import (
     EntityType,
     ProjectEventType,
+    PullRequestStatus,
     SprintStatus,
     StoryStatus,
     TaskStatus,
 )
 from app.models.epic import Epic
 from app.models.project_event import ProjectEvent
+from app.models.project_github_repo import ProjectGithubRepo
+from app.models.pull_request import PullRequest
 from app.models.sprint import Sprint
 from app.models.sprint_requirement_baseline import SprintRequirementBaseline
 from app.models.story import Story
@@ -40,6 +45,8 @@ from app.schemas.dashboard import (
     DependencyRiskExample,
     DependencyRiskIndicator,
     ProjectDashboardResponse,
+    ReviewRiskExample,
+    ReviewRiskIndicator,
     ScopeRiskDriver,
     ScopeRiskIndicator,
 )
@@ -52,6 +59,15 @@ SEMANTIC_SIMILARITY_THRESHOLD = 0.85
 MAX_SEMANTIC_PAIRS = 15
 SCOPE_CREEP_GROWTH_PCT = 25.0
 SCOPE_CREEP_ISSUES_ADDED = 3
+REVIEW_HISTORY_SPRINTS = 3
+REVIEW_BASELINE_DAYS = 60
+REVIEW_MIN_BASELINE_PRS = 5
+REVIEW_DEFAULT_NORMAL_DAYS = 1.0
+REVIEW_HIGH_RATIO = 3.0
+REVIEW_MEDIUM_RATIO = 1.5
+REVIEW_HIGH_MIN_OPEN = 3
+REVIEW_MEDIUM_MIN_OPEN = 2
+REVIEW_MAX_EXAMPLES = 5
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -864,6 +880,225 @@ def _compute_dependency_indicator(
     )
 
 
+def _days_between(start: datetime | None, end: datetime | None) -> float | None:
+    start, end = _aware(start), _aware(end)
+    if start is None or end is None:
+        return None
+    return max((end - start).total_seconds() / 86400.0, 0.0)
+
+
+def _sprint_pr_rows(
+    db: Session,
+    project_id: uuid.UUID,
+    sprint_ids: list[uuid.UUID],
+    *,
+    open_only: bool,
+) -> list[tuple[PullRequest, Task | None, Story | None, str | None]]:
+    if not sprint_ids:
+        return []
+    query = (
+        db.query(PullRequest, Task, Story, ProjectGithubRepo.full_name)
+        .join(ProjectGithubRepo, ProjectGithubRepo.id == PullRequest.repo_link_id)
+        .outerjoin(Task, Task.id == PullRequest.task_id)
+        .outerjoin(Story, Story.id == PullRequest.story_id)
+        .filter(
+            PullRequest.project_id == project_id,
+            or_(Task.sprint_id.in_(sprint_ids), Story.sprint_id.in_(sprint_ids)),
+        )
+    )
+    if open_only:
+        query = query.filter(PullRequest.status == PullRequestStatus.open, PullRequest.draft.is_(False))
+    else:
+        query = query.filter(PullRequest.merged_at.isnot(None))
+    seen: set[uuid.UUID] = set()
+    rows = []
+    for pr, task, story, repo in query.all():
+        if pr.id in seen:
+            continue
+        seen.add(pr.id)
+        rows.append((pr, task, story, repo))
+    return rows
+
+
+def _merge_durations(prs: Iterable[PullRequest]) -> list[float]:
+    durations = []
+    for pr in prs:
+        days = _days_between(pr.opened_at or pr.created_at, pr.merged_at)
+        if days is not None:
+            durations.append(days)
+    return durations
+
+
+def _review_baseline(db: Session, project_id: uuid.UUID, sprint: Sprint) -> tuple[float, str, int]:
+    history_ids = [
+        row.id
+        for row in (
+            db.query(Sprint.id)
+            .filter(
+                Sprint.project_id == project_id,
+                Sprint.status == SprintStatus.completed,
+                Sprint.id != sprint.id,
+            )
+            .order_by(Sprint.ends_at.desc().nullslast(), Sprint.completed_at.desc().nullslast())
+            .limit(REVIEW_HISTORY_SPRINTS)
+            .all()
+        )
+    ]
+    history = _merge_durations(pr for pr, *_ in _sprint_pr_rows(db, project_id, history_ids, open_only=False))
+    if len(history) >= REVIEW_MIN_BASELINE_PRS:
+        return statistics.median(history), "sprint_history", len(history)
+
+    since = _now() - timedelta(days=REVIEW_BASELINE_DAYS)
+    recent = _merge_durations(
+        db.query(PullRequest)
+        .filter(
+            PullRequest.project_id == project_id,
+            PullRequest.repo_link_id.isnot(None),
+            PullRequest.merged_at.isnot(None),
+            PullRequest.merged_at >= since,
+        )
+        .all()
+    )
+    if len(recent) >= REVIEW_MIN_BASELINE_PRS:
+        return statistics.median(recent), "project", len(recent)
+
+    return REVIEW_DEFAULT_NORMAL_DAYS, "default", 0
+
+
+def _review_level(ratio: float | None, open_count: int) -> str:
+    if ratio is not None and ratio >= REVIEW_HIGH_RATIO and open_count >= REVIEW_HIGH_MIN_OPEN:
+        return "high"
+    if ratio is not None and ratio >= REVIEW_MEDIUM_RATIO and open_count >= REVIEW_MEDIUM_MIN_OPEN:
+        return "medium"
+    return "low"
+
+
+def _points_in_review(
+    rows: list[tuple[PullRequest, Task | None, Story | None, str | None]],
+    stories: list[Story],
+    tasks: list[Task],
+) -> tuple[float, bool]:
+    if _use_story_points(stories):
+        stories_by_id = {s.id: s for s in stories}
+        story_ids = {story.id for _, _, story, _ in rows if story is not None}
+        story_ids |= {task.story_id for _, task, _, _ in rows if task is not None and task.story_id}
+        total = sum(
+            _points(stories_by_id[sid].story_points)
+            for sid in story_ids
+            if sid in stories_by_id and stories_by_id[sid].status not in (StoryStatus.done, StoryStatus.cancelled)
+        )
+        return round(total, 1), True
+
+    tasks_by_id = {t.id: t for t in tasks}
+    task_ids = {task.id for _, task, _, _ in rows if task is not None and task.id in tasks_by_id}
+    open_tasks = [tasks_by_id[tid] for tid in task_ids if _task_open(tasks_by_id[tid].status)]
+    if any(t.story_points for t in tasks):
+        return round(sum(_points(t.story_points) for t in open_tasks), 1), True
+    return float(len(open_tasks)), False
+
+
+def _compute_review_indicator(
+    db: Session,
+    project_id: uuid.UUID,
+    sprint: Sprint,
+    stories: list[Story],
+    tasks: list[Task],
+) -> ReviewRiskIndicator:
+    has_repos = db.query(ProjectGithubRepo.id).filter(ProjectGithubRepo.project_id == project_id).first()
+    if has_repos is None:
+        return ReviewRiskIndicator(unavailable_reason="No GitHub repositories linked")
+
+    unlinked_open = (
+        db.query(PullRequest.id)
+        .filter(
+            PullRequest.project_id == project_id,
+            PullRequest.repo_link_id.isnot(None),
+            PullRequest.status == PullRequestStatus.open,
+            PullRequest.draft.is_(False),
+            PullRequest.task_id.is_(None),
+            PullRequest.story_id.is_(None),
+        )
+        .count()
+    )
+    any_linked = (
+        db.query(PullRequest.id)
+        .filter(
+            PullRequest.project_id == project_id,
+            PullRequest.repo_link_id.isnot(None),
+            or_(PullRequest.task_id.isnot(None), PullRequest.story_id.isnot(None)),
+        )
+        .first()
+    )
+    if any_linked is None:
+        return ReviewRiskIndicator(
+            unavailable_reason="No PRs reference Jira issues",
+            unlinked_open_pr_count=unlinked_open,
+        )
+
+    now = _now()
+    rows = _sprint_pr_rows(db, project_id, [sprint.id], open_only=True)
+    aged: list[tuple[float, PullRequest, Task | None, Story | None, str | None]] = []
+    for pr, task, story, repo in rows:
+        age = _days_between(pr.opened_at or pr.created_at, now)
+        if age is not None:
+            aged.append((age, pr, task, story, repo))
+    aged.sort(key=lambda item: item[0], reverse=True)
+
+    normal, baseline_source, sample_size = _review_baseline(db, project_id, sprint)
+    points, uses_points = _points_in_review(rows, stories, tasks)
+    open_count = len(aged)
+
+    median_age: float | None = None
+    ratio: float | None = None
+    if aged:
+        median_age = statistics.median(age for age, *_ in aged)
+        if normal > 0:
+            ratio = median_age / normal
+
+    level = _review_level(ratio, open_count)
+
+    examples = [
+        ReviewRiskExample(
+            title=pr.title,
+            repo=repo,
+            number=pr.number,
+            url=pr.url,
+            age_days=round(age, 1),
+            author_login=pr.author_login,
+            jira_key=(task.external_key if task else None) or (story.external_key if story else None),
+            work_item_title=(task.title if task else None) or (story.title if story else None),
+        )
+        for age, pr, task, story, repo in aged[:REVIEW_MAX_EXAMPLES]
+    ]
+
+    summary: str | None = None
+    if open_count and median_age is not None:
+        unit = "pts" if uses_points else "items"
+        summary = (
+            f"{open_count} open PR{'s' if open_count != 1 else ''} on sprint work, "
+            f"median age {median_age:.1f} days vs a normal {normal:.1f} days"
+            f"{f' ({ratio:.1f}x)' if ratio is not None else ''}."
+        )
+        if points:
+            summary += f" {points:g} {unit} waiting on review."
+
+    return ReviewRiskIndicator(
+        level=level,
+        bottleneck_detected=level == "high",
+        open_pr_count=open_count,
+        median_open_age_days=round(median_age, 1) if median_age is not None else None,
+        normal_median_days=round(normal, 1),
+        age_ratio=round(ratio, 1) if ratio is not None else None,
+        baseline_source=baseline_source,
+        baseline_sample_size=sample_size,
+        points_in_review=points,
+        uses_points=uses_points,
+        unlinked_open_pr_count=unlinked_open,
+        summary=summary,
+        examples=examples,
+    )
+
+
 def _compute_risk_indicators(
     db: Session,
     project_id: uuid.UUID,
@@ -881,6 +1116,7 @@ def _compute_risk_indicators(
             db, project_id, sprint, stories, tasks, progress, risks.scope_added_points
         ),
         dependency=_compute_dependency_indicator(db, project_id, tasks, stories),
+        review=_compute_review_indicator(db, project_id, sprint, stories, tasks),
     )
 
 

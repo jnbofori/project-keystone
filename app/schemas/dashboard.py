@@ -92,10 +92,39 @@ class DependencyRiskIndicator(BaseModel):
     unavailable_reason: str | None = None
 
 
+class ReviewRiskExample(BaseModel):
+    title: str
+    repo: str | None = None
+    number: int | None = None
+    url: str | None = None
+    age_days: float
+    author_login: str | None = None
+    jira_key: str | None = None
+    work_item_title: str | None = None
+
+
+class ReviewRiskIndicator(BaseModel):
+    level: str | None = None
+    bottleneck_detected: bool = False
+    open_pr_count: int = 0
+    median_open_age_days: float | None = None
+    normal_median_days: float | None = None
+    age_ratio: float | None = None
+    baseline_source: str | None = None
+    baseline_sample_size: int = 0
+    points_in_review: float = 0
+    uses_points: bool = False
+    unlinked_open_pr_count: int = 0
+    summary: str | None = None
+    examples: list[ReviewRiskExample] = Field(default_factory=list)
+    unavailable_reason: str | None = None
+
+
 class DashboardRiskIndicators(BaseModel):
     delivery: DeliveryRiskIndicator = Field(default_factory=DeliveryRiskIndicator)
     scope: ScopeRiskIndicator = Field(default_factory=ScopeRiskIndicator)
     dependency: DependencyRiskIndicator = Field(default_factory=DependencyRiskIndicator)
+    review: ReviewRiskIndicator = Field(default_factory=ReviewRiskIndicator)
 
 
 class DashboardStatusCount(BaseModel):

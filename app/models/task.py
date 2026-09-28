@@ -25,8 +25,10 @@ from app.database import Base
 from app.models.enums import IntegrationSource, TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
+    from app.models.commit import Commit
     from app.models.discussion import Discussion
     from app.models.epic import Epic
+    from app.models.github_branch import GithubBranch
     from app.models.project import Project
     from app.models.pull_request import PullRequest
     from app.models.risk import Risk
@@ -101,7 +103,9 @@ class Task(Base):
         foreign_keys="TaskDependency.depends_on_task_id",
         passive_deletes=True,
     )
-    pull_requests: Mapped[list["PullRequest"]] = relationship(back_populates="task")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(back_populates="task", passive_deletes=True)
+    commits: Mapped[list["Commit"]] = relationship(back_populates="task", passive_deletes=True)
+    branches: Mapped[list["GithubBranch"]] = relationship(back_populates="task", passive_deletes=True)
     discussions: Mapped[list["Discussion"]] = relationship(back_populates="task")
     risks: Mapped[list["Risk"]] = relationship(back_populates="related_task")
 

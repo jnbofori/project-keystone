@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
+from app.integrations.github.linking import relink_key
 from app.integrations.jira.client import JiraClient
 from app.integrations.jira.errors import JiraAPIError
 from app.integrations.jira.mappers import classify_issue
@@ -328,6 +329,7 @@ def handle_issue_webhook(
 
     if event == "jira:issue_deleted":
         _delete_issue(db, project, issue_key)
+        relink_key(db, project, issue_key)
         db.commit()
         return
 
@@ -375,6 +377,7 @@ def handle_issue_webhook(
             acceptance_criteria_field=acceptance_criteria_field,
         )
         sync_task_dependencies(db, task, issue, tasks_by_key, project=project)
+    relink_key(db, project, issue_key)
     db.commit()
 
 

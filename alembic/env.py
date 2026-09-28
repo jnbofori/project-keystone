@@ -10,6 +10,7 @@ from app.models import (  # noqa: F401
     Discussion,
     Document,
     Epic,
+    GithubBranch,
     GithubInstallation,
     JiraConnection,
     Project,

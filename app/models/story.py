@@ -12,8 +12,11 @@ from app.database import Base
 from app.models.enums import IntegrationSource, StoryStatus, TaskPriority
 
 if TYPE_CHECKING:
+    from app.models.commit import Commit
     from app.models.epic import Epic
+    from app.models.github_branch import GithubBranch
     from app.models.project import Project
+    from app.models.pull_request import PullRequest
     from app.models.sprint import Sprint
     from app.models.task import Task
     from app.models.team_member import TeamMember
@@ -70,3 +73,6 @@ class Story(Base):
     sprint: Mapped["Sprint | None"] = relationship(back_populates="stories")
     assignee: Mapped["TeamMember | None"] = relationship(back_populates="assigned_stories")
     tasks: Mapped[list["Task"]] = relationship(back_populates="story")
+    pull_requests: Mapped[list["PullRequest"]] = relationship(back_populates="story", passive_deletes=True)
+    commits: Mapped[list["Commit"]] = relationship(back_populates="story", passive_deletes=True)
+    branches: Mapped[list["GithubBranch"]] = relationship(back_populates="story", passive_deletes=True)
